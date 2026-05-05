@@ -1,0 +1,16 @@
+# Whitelist Polymarket трейдеров — по одному адресу в строке
+# Строки с # и пустые игнорируются
+# Можно редактировать на лету — перечитывается при каждой сделке
+
+0x9495425feeb0c250accb89275c97587011b19a27  # LaBradfordSmith22
+0x6ac5bb06a9eb05641fd5e82640268b92f3ab4b6e  # Lakersfan111
+0xb652e5dabc3fccd3c939acab0108f99866842db4  # 0x2a2C53b... (анон)
+0xe26cacfaa3f695a2a239e5918936b10d56f188cf  # Dvitaminbets
+0x5257aa84944804bbb0c718814ebebeeafaca3e2a  # NO-GOD-PLEASE-NO
+0x9ac2536ed93f8fe8ce91d9662b03bcbb19ccbe3d  # ChloeT1
+0xfbf3d501e88815464642d0e913f15379c3eeb218  # VPenguin
+0xe72bb501df5306c75c89383d48a1e81073fbb0a0  # norrisfan
+0x37e4728b3c4607fb2b3b205386bb1d1fb1a8c991  # SemyonMarmeladov
+0x5c3a1a602848565bb16165fcd460b00c3d43020b  # embarrassment
+0xc41d736bded9ed1accd6a44235039266219774fd  # 0xC41D736b... (#29)
+0x45c9c799e0e6ddf19c50e9dac5ab5a925f9b414b  # Uzim000

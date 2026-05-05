@@ -1,0 +1,44 @@
+# ── СЕКРЕТЫ — никогда не коммитим! ──
+.env
+*.env
+!.env.example
+
+# ── Локальная БД — у каждого своя ──
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+tracker.db*
+
+# ── Whitelist (опционально) ──
+# Если хочешь шарить whitelist — закомментируй следующую строку
+# whitelist.txt
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Логи ──
+*.log
+logs/
