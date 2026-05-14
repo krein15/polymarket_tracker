@@ -127,6 +127,11 @@ class AnomalyDetector:
         if trade.usdc_amount < cfg.min_trade_usdc:
             return False
 
+        # Отсекаем "почти решённые" рынки: на price≥0.95 ROI~+0.5%
+        # (меньше спреда Polymarket), сигнал торгово-бесполезен.
+        if trade.price >= cfg.max_trade_price:
+            return False
+
         if market.closed:
             return False
 

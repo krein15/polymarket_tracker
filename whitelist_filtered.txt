@@ -1,0 +1,21 @@
+# Whitelist Polymarket трейдеров
+# Фильтр: winrate >= 80%, min 5 завершённых рынков
+# Сгенерировано: 2026-05-05 21:36
+# Всего: 16 адресов
+
+0x9495425feeb0c250accb89275c97587011b19a27  # LaBradfordSmith22 (winrate 100.0%, 10W/0L)
+0xb652e5dabc3fccd3c939acab0108f99866842db4  # 0x2a2C53b (анон) (winrate 100.0%, 21W/0L)
+0x5257aa84944804bbb0c718814ebebeeafaca3e2a  # NO-GOD-PLEASE-NO (winrate 100.0%, 13W/0L)
+0x37e4728b3c4607fb2b3b205386bb1d1fb1a8c991  # SemyonMarmeladov (winrate 100.0%, 8W/0L)
+0xc41d736bded9ed1accd6a44235039266219774fd  # 0xC41D736b (#29) (winrate 100.0%, 17W/0L)
+0x88c4919de76e526d55a32c1f8afb439dd1f1129a  # 8934394839 (winrate 100.0%, 15W/0L)
+0x3de4543d599ffb09386aac2eab198a295511b032  # 248188374 (winrate 100.0%, 6W/0L)
+0x033f0346c007323030eb420305ffede19a95618e  # TheVeryGoodCow (winrate 100.0%, 86W/0L)
+0xefddbb135e2cc2648e3ca6a6b3d4fa4994d5017f  # maxgreen (winrate 100.0%, 5W/0L)
+0xc96e5287ab294ac0388c2ddb00180fc464cff1f9  # wigglew (winrate 100.0%, 14W/0L)
+0xa6d9b55a6a3a54a9d50ca94c64f00af69c50fd2f  # Amrosein (winrate 100.0%, 17W/0L)
+0xe72bb501df5306c75c89383d48a1e81073fbb0a0  # norrisfan (winrate 92.9%, 13W/1L)
+0x75d4c19708ad084c1cf6a10cfdf528c76fd94027  # maduroisq (winrate 91.7%, 11W/1L)
+0x03bac23a9d3285eb748b3fabd4c9653d11fda1ef  # KairosHunter (winrate 90.0%, 9W/1L)
+0x384fdc42f4f9cdee6b311c5d0dba6f81eb4658ad  # Political-Predator (winrate 85.7%, 6W/1L)
+0xcddfe6ceef57bbb2afcb68db611e4ffe26b81b3f  # krimut (winrate 80.0%, 16W/4L)

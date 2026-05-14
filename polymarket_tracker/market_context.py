@@ -32,6 +32,9 @@ class MarketInfo:
     end_date_iso: Optional[str]
     outcome: str  # "Yes" / "No" / название outcome соответствующее token_id
     closed: bool
+    # Поля для outcome-трекера (фаза 1.2)
+    last_trade_price: Optional[float] = None  # текущая цена нашего token_id
+    settled_price: Optional[float] = None  # финальная цена нашего token_id (если closed)
 
     def url(self) -> str:
         return f"https://polymarket.com/event/{self.slug}"
@@ -63,53 +66,19 @@ class MarketContext:
             self._session = None
 
     async def get_by_token_id(self, token_id: str) -> Optional[MarketInfo]:
-        """Найти рынок по одному из clob_token_ids (UP или DOWN токен)."""
+        """Найти рынок по одному из clob_token_ids (UP или DOWN токен).
+
+        Использует кэш — подходит для основного цикла, где нужны статичные
+        метаданные (название, категория, slug). Цены могут быть устаревшими
+        до 5 минут.
+        """
         if token_id in self._cache:
             return self._cache[token_id]
         if token_id in self._negative_cache:
             return None
 
-        if self._session is None:
-            self._session = self._make_session()
-
-        url = f"{GAMMA_API_BASE}/markets"
-        params = {"clob_token_ids": token_id, "limit": 1}
-
-        # 3 попытки с пересозданием сессии при ошибке
-        for attempt in range(3):
-            try:
-                async with self._session.get(url, params=params) as resp:
-                    if resp.status != 200:
-                        log.warning("Gamma /markets вернул %d для token=%s", resp.status, token_id[:12])
-                        self._negative_cache[token_id] = 1
-                        return None
-                    data = await resp.json()
-                break  # успех — выходим из цикла
-            except asyncio.TimeoutError:
-                log.warning("Gamma API таймаут (попытка %d/3) для token=%s — пересоздаю сессию", attempt + 1, token_id[:12])
-                await self.close()
-                self._session = self._make_session()
-                if attempt < 2:
-                    await asyncio.sleep(3)
-                else:
-                    return None  # все 3 попытки провалились
-            except aiohttp.ClientError as e:
-                log.warning("Gamma API ошибка (попытка %d/3): %s — пересоздаю сессию", attempt + 1, e)
-                await self.close()
-                self._session = self._make_session()
-                if attempt < 2:
-                    await asyncio.sleep(3)
-                else:
-                    return None
-
-        if not data or not isinstance(data, list):
-            self._negative_cache[token_id] = 1
-            return None
-
-        market = data[0]
-        info = self._parse_market(market, token_id)
-        if info:
-            # Кэшируем оба token_id рынка
+        info, market = await self._fetch_from_api(token_id)
+        if info and market:
             self._cache[token_id] = info
             clob_ids = market.get("clobTokenIds", [])
             if isinstance(clob_ids, str):
@@ -121,10 +90,72 @@ class MarketContext:
             for other_id in clob_ids:
                 if other_id and other_id != token_id:
                     self._cache[str(other_id)] = info
-        else:
+        elif info is None:
             self._negative_cache[token_id] = 1
 
         return info
+
+    async def fetch_fresh(self, token_id: str) -> Optional[MarketInfo]:
+        """Получить актуальные данные минуя кэш (для outcome-трекера).
+
+        Делает до двух попыток: сначала с дефолтным фильтром Gamma (активные
+        рынки), потом с closed=true (зарезолвленные). Не пишет в основной
+        кэш — иначе портила бы свежесть для других вызывающих.
+        """
+        info, _ = await self._fetch_from_api(token_id, include_closed=False)
+        if info is None:
+            info, _ = await self._fetch_from_api(token_id, include_closed=True)
+        return info
+
+    async def _fetch_from_api(
+        self, token_id: str, include_closed: bool = False
+    ) -> tuple[Optional[MarketInfo], Optional[dict]]:
+        """Низкоуровневый запрос к Gamma. Возвращает (info, raw_market_dict).
+
+        include_closed=True добавляет ?closed=true — Gamma по умолчанию
+        возвращает только активные рынки, но для outcome-трекера нам нужны
+        как раз закрытые (узнать settled_price).
+        """
+        if self._session is None:
+            self._session = self._make_session()
+
+        url = f"{GAMMA_API_BASE}/markets"
+        params: dict = {"clob_token_ids": token_id, "limit": 1}
+        if include_closed:
+            params["closed"] = "true"
+
+        data = None
+        for attempt in range(3):
+            try:
+                async with self._session.get(url, params=params) as resp:
+                    if resp.status != 200:
+                        log.warning("Gamma /markets вернул %d для token=%s", resp.status, token_id[:12])
+                        return None, None
+                    data = await resp.json()
+                break
+            except asyncio.TimeoutError:
+                log.warning("Gamma API таймаут (попытка %d/3) для token=%s — пересоздаю сессию", attempt + 1, token_id[:12])
+                await self.close()
+                self._session = self._make_session()
+                if attempt < 2:
+                    await asyncio.sleep(3)
+                else:
+                    return None, None
+            except aiohttp.ClientError as e:
+                log.warning("Gamma API ошибка (попытка %d/3): %s — пересоздаю сессию", attempt + 1, e)
+                await self.close()
+                self._session = self._make_session()
+                if attempt < 2:
+                    await asyncio.sleep(3)
+                else:
+                    return None, None
+
+        if not data or not isinstance(data, list):
+            return None, None
+
+        market = data[0]
+        info = self._parse_market(market, token_id)
+        return info, market
 
     def _parse_market(self, m: dict, token_id: str) -> Optional[MarketInfo]:
         """Вынимаем из ответа Gamma только нужные поля."""
@@ -162,6 +193,41 @@ class MarketContext:
                     category = events[0].get("category", "") or ""
             category = category.lower().strip()
 
+            # Текущая цена нашего token_id. Gamma отдаёт массив outcomePrices
+            # выровненный по clobTokenIds — если есть, берём по индексу нашего токена.
+            # Иначе fallback на lastTradePrice.
+            current_price: Optional[float] = None
+            settled_price: Optional[float] = None
+            closed = bool(m.get("closed", False))
+
+            outcome_prices = m.get("outcomePrices", [])
+            if isinstance(outcome_prices, str):
+                import json
+                try:
+                    outcome_prices = json.loads(outcome_prices)
+                except json.JSONDecodeError:
+                    outcome_prices = []
+
+            try:
+                idx = [str(c) for c in clob_ids].index(str(token_id))
+                if idx < len(outcome_prices):
+                    current_price = float(outcome_prices[idx])
+            except (ValueError, TypeError):
+                pass
+
+            if current_price is None:
+                ltp = m.get("lastTradePrice")
+                if ltp is not None:
+                    try:
+                        current_price = float(ltp)
+                    except (ValueError, TypeError):
+                        pass
+
+            # Если рынок закрыт — то, что у нас в outcomePrices, это финальная цена.
+            # Бинарный резолв: 1.0 для победителя, 0.0 для проигравшего.
+            if closed and current_price is not None:
+                settled_price = current_price
+
             return MarketInfo(
                 condition_id=m.get("conditionId", ""),
                 question=m.get("question", "")[:200],
@@ -172,7 +238,9 @@ class MarketContext:
                 liquidity=float(m.get("liquidity", 0) or 0),
                 end_date_iso=m.get("endDate"),
                 outcome=outcome,
-                closed=bool(m.get("closed", False)),
+                closed=closed,
+                last_trade_price=current_price,
+                settled_price=settled_price,
             )
         except (KeyError, ValueError, TypeError) as e:
             log.warning("Не смог распарсить market: %s", e)

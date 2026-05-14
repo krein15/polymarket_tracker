@@ -100,6 +100,16 @@ class TelegramNotifier:
             "cluster": "CLUSTER",
         }.get(s.signal_type, s.signal_type.upper())
 
+        # Маркировка стороны: для whitelist особенно важно отличать вход от
+        # выхода — "whale exit" и "whale entry" это разные сигналы.
+        side = (s.trade.side or "").lower()
+        if side == "buy":
+            side_label = "📈 BUY"
+        elif side == "sell":
+            side_label = "📉 SELL"
+        else:
+            side_label = side.upper() if side else "?"
+
         question = html.escape(s.market.question or "?")
         reason = html.escape(s.reason)
         maker_short = f"{s.trade.maker[:8]}..{s.trade.maker[-4:]}"
@@ -119,7 +129,7 @@ class TelegramNotifier:
         polygonscan_addr = f"https://polygonscan.com/address/{s.trade.maker}"
 
         lines = [
-            f"{icon} <b>{type_label}</b>",
+            f"{icon} <b>{type_label}</b> · {side_label}",
             "",
             f"<b>Рынок:</b> {question}",
             f"<b>Outcome:</b> {html.escape(s.market.outcome)} @ {s.trade.price:.3f}",

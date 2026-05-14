@@ -19,7 +19,9 @@ from .anomaly_detector import AnomalyDetector, Signal
 from .config import Config
 from .data_api_listener import DataApiListener, Trade
 from .market_context import MarketContext
+from .outcome_tracker import OutcomeTracker
 from .storage import Storage
+from .telegram_commands import TelegramCommandHandler
 from .telegram_notifier import TelegramNotifier
 from .wallet_analyzer import WalletAnalyzer
 from .watchlist import Watchlist
@@ -37,6 +39,11 @@ class PolymarketTracker:
         self.wallet_analyzer = WalletAnalyzer(self.storage, config)
         self.detector = AnomalyDetector(config, self.storage, self.watchlist)
         self.notifier = TelegramNotifier(config.telegram_bot_token, config.telegram_chat_id)
+        # Отдельный MarketContext для outcome_tracker — изолирует HTTP-сессию.
+        # Иначе таймаут в одном месте закрывает сессию посреди запроса в другом.
+        self.outcome_market_ctx = MarketContext()
+        self.outcome_tracker = OutcomeTracker(self.storage, self.outcome_market_ctx)
+        self.commands = TelegramCommandHandler(config, self.storage)
 
         # Счётчики для периодической статистики
         self._stats_trades = 0
@@ -54,6 +61,7 @@ class PolymarketTracker:
     async def run(self) -> None:
         """Основной цикл. Работает до Ctrl+C."""
         await self.market_ctx.start()
+        await self.outcome_market_ctx.start()
         await self.notifier.start()
 
         # Возобновление с последнего сохранённого timestamp
@@ -67,8 +75,10 @@ class PolymarketTracker:
         )
         log.info("=== Tracker started ===")
 
-        # Запускаем периодическую статистику в фоне
+        # Запускаем периодические фоновые задачи
         stats_task = asyncio.create_task(self._stats_loop())
+        outcome_task = asyncio.create_task(self.outcome_tracker.run())
+        commands_task = asyncio.create_task(self.commands.run())
 
         try:
             async for trade in self.listener.stream_trades(start_ts=start_ts):
@@ -80,9 +90,19 @@ class PolymarketTracker:
             log.info("Остановка трекера...")
         finally:
             stats_task.cancel()
+            outcome_task.cancel()
+            commands_task.cancel()
+            # Дать задачам корректно завершиться (подавляем CancelledError)
+            for t in (stats_task, outcome_task, commands_task):
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
             await self.market_ctx.close()
+            await self.outcome_market_ctx.close()
             await self.listener.close()
             await self.notifier.close()
+            await self.commands.close()
 
     def _get_start_ts(self) -> int:
         """Возобновление с последнего сохранённого timestamp сделки."""
@@ -178,7 +198,11 @@ class PolymarketTracker:
             price=signal.trade.price,
             reason=signal.reason,
             tx_hash=signal.trade.tx_hash,
+            side=signal.trade.side,
         )
+
+        # Заводим болванку для outcome-трекера (фаза 1.2)
+        self.storage.init_outcome_record(signal_id, int(time.time()))
 
         msg_id = await self.notifier.send_signal(signal)
         if msg_id:

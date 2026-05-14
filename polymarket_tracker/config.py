@@ -61,6 +61,7 @@ class Config:
 
     # Signal filters
     min_trade_usdc: float = 500.0
+    max_trade_price: float = 0.95  # отсекаем "почти решённые" рынки (ROI<спред)
     max_market_volume_24h: float = 100_000.0
     new_wallet_max_trades: int = 20
     new_wallet_max_age_days: int = 30
@@ -112,6 +113,7 @@ class Config:
             data_api_poll_interval=_float("DATA_API_POLL_INTERVAL", 3.0),
             data_api_batch_limit=_int("DATA_API_BATCH_LIMIT", 200),
             min_trade_usdc=_float("MIN_TRADE_USDC", 500.0),
+            max_trade_price=_float("MAX_TRADE_PRICE", 0.95),
             max_market_volume_24h=_float("MAX_MARKET_VOLUME_24H", 100_000.0),
             new_wallet_max_trades=_int("NEW_WALLET_MAX_TRADES", 20),
             new_wallet_max_age_days=_int("NEW_WALLET_MAX_AGE_DAYS", 30),
@@ -141,4 +143,6 @@ class Config:
             errors.append("DATA_API_POLL_INTERVAL < 1.0 сек — слишком агрессивно")
         if self.data_api_batch_limit < 1 or self.data_api_batch_limit > 10000:
             errors.append("DATA_API_BATCH_LIMIT должен быть в диапазоне [1, 10000]")
+        if not 0 < self.max_trade_price <= 1.0:
+            errors.append(f"MAX_TRADE_PRICE должен быть в (0, 1.0], сейчас {self.max_trade_price}")
         return errors

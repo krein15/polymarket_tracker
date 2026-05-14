@@ -62,6 +62,28 @@ CREATE TABLE IF NOT EXISTS checkpoint (
 """
 
 
+SCHEMA_OUTCOMES = """
+CREATE TABLE IF NOT EXISTS signal_outcomes (
+    signal_id INTEGER PRIMARY KEY,
+    price_1h REAL,
+    price_24h REAL,
+    price_7d REAL,
+    max_price_reached REAL,
+    min_price_reached REAL,
+    market_resolved INTEGER NOT NULL DEFAULT 0,
+    settled_price REAL,
+    trader_was_right INTEGER,
+    roi_if_followed REAL,
+    hours_to_resolve REAL,
+    last_checked_ts INTEGER,
+    created_ts INTEGER NOT NULL,
+    FOREIGN KEY (signal_id) REFERENCES signals(id)
+);
+CREATE INDEX IF NOT EXISTS idx_outcomes_check_queue
+    ON signal_outcomes(market_resolved, last_checked_ts);
+"""
+
+
 @dataclass
 class WalletStats:
     address: str
@@ -83,6 +105,14 @@ class Storage:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA)
+            c.executescript(SCHEMA_OUTCOMES)
+            # Идемпотентная миграция: добавить signals.side, если ещё нет.
+            # Все старые сигналы — это buy (другая сторона ранее не реализовывалась).
+            try:
+                c.execute("ALTER TABLE signals ADD COLUMN side TEXT DEFAULT 'buy'")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -203,17 +233,32 @@ class Storage:
         price: float,
         reason: str,
         tx_hash: Optional[str] = None,
+        side: str = "buy",
     ) -> int:
         with self._conn() as c:
             cur = c.execute(
                 """
                 INSERT INTO signals
-                (ts, signal_type, maker, token_id, market_slug, usdc_amount, price, reason, tx_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (ts, signal_type, maker, token_id, market_slug,
+                 usdc_amount, price, reason, tx_hash, side)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ts, signal_type, maker.lower(), token_id, market_slug, usdc_amount, price, reason, tx_hash),
+                (ts, signal_type, maker.lower(), token_id, market_slug,
+                 usdc_amount, price, reason, tx_hash, side),
             )
             return cur.lastrowid or 0
+
+    def init_outcome_record(self, signal_id: int, now_ts: int) -> None:
+        """Создать пустую запись для трекинга исхода. Идемпотентно."""
+        with self._conn() as c:
+            c.execute(
+                """
+                INSERT INTO signal_outcomes (signal_id, created_ts)
+                VALUES (?, ?)
+                ON CONFLICT(signal_id) DO NOTHING
+                """,
+                (signal_id, now_ts),
+            )
 
     def update_signal_telegram(self, signal_id: int, msg_id: int) -> None:
         with self._conn() as c:
@@ -239,4 +284,149 @@ class Storage:
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value
                 """,
                 (key, value),
+            )
+
+    # ───────── Outcomes ─────────
+
+    def backfill_outcome_records(self) -> int:
+        """Создать болванки signal_outcomes для всех старых signals без записи.
+
+        Идемпотентно: при повторных вызовах ничего не делает.
+        Возвращает количество новосозданных записей.
+        """
+        with self._conn() as c:
+            cur = c.execute(
+                """
+                INSERT INTO signal_outcomes (signal_id, created_ts)
+                SELECT s.id, s.ts
+                FROM signals s
+                LEFT JOIN signal_outcomes o ON o.signal_id = s.id
+                WHERE o.signal_id IS NULL
+                """
+            )
+            return cur.rowcount or 0
+
+    def get_outcomes_to_update(self, limit: int = 100) -> list[dict]:
+        """Получить незакрытые исходы для проверки.
+
+        Возвращает список dict-ов с полями нужными outcome_tracker'у:
+        signal_id, token_id, side, price_at_signal, signal_ts, created_ts,
+        last_checked_ts, has_price_1h, has_price_24h, has_price_7d.
+
+        Сортировка: дольше всех не проверявшиеся первыми (NULL last_checked_ts
+        — самые приоритетные).
+        """
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT
+                    o.signal_id,
+                    s.token_id,
+                    s.side,
+                    s.price AS price_at_signal,
+                    s.ts AS signal_ts,
+                    o.created_ts,
+                    o.last_checked_ts,
+                    (o.price_1h IS NOT NULL) AS has_price_1h,
+                    (o.price_24h IS NOT NULL) AS has_price_24h,
+                    (o.price_7d IS NOT NULL) AS has_price_7d
+                FROM signal_outcomes o
+                JOIN signals s ON s.id = o.signal_id
+                WHERE o.market_resolved = 0
+                ORDER BY
+                    CASE WHEN o.last_checked_ts IS NULL THEN 0 ELSE 1 END,
+                    o.last_checked_ts ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_outcome_snapshots(
+        self,
+        signal_id: int,
+        now_ts: int,
+        current_price: Optional[float],
+        set_price_1h: bool = False,
+        set_price_24h: bool = False,
+        set_price_7d: bool = False,
+    ) -> None:
+        """Обновить snapshot-поля для незакрытого исхода.
+
+        Если current_price передана — обновляет min/max и заполняет нужные
+        price_Xh поля (если set_price_Xh=True). last_checked_ts обновляется
+        всегда — даже если current_price=None (значит, мы пытались, но Gamma
+        промахнулась).
+        """
+        with self._conn() as c:
+            if current_price is None:
+                c.execute(
+                    "UPDATE signal_outcomes SET last_checked_ts = ? WHERE signal_id = ?",
+                    (now_ts, signal_id),
+                )
+                return
+
+            sets = ["last_checked_ts = ?"]
+            params: list = [now_ts]
+
+            # min/max обновляем атомарно через COALESCE
+            sets.append(
+                "max_price_reached = CASE "
+                "WHEN max_price_reached IS NULL OR ? > max_price_reached THEN ? "
+                "ELSE max_price_reached END"
+            )
+            params.extend([current_price, current_price])
+            sets.append(
+                "min_price_reached = CASE "
+                "WHEN min_price_reached IS NULL OR ? < min_price_reached THEN ? "
+                "ELSE min_price_reached END"
+            )
+            params.extend([current_price, current_price])
+
+            if set_price_1h:
+                sets.append("price_1h = COALESCE(price_1h, ?)")
+                params.append(current_price)
+            if set_price_24h:
+                sets.append("price_24h = COALESCE(price_24h, ?)")
+                params.append(current_price)
+            if set_price_7d:
+                sets.append("price_7d = COALESCE(price_7d, ?)")
+                params.append(current_price)
+
+            params.append(signal_id)
+            c.execute(
+                f"UPDATE signal_outcomes SET {', '.join(sets)} WHERE signal_id = ?",
+                params,
+            )
+
+    def finalize_outcome(
+        self,
+        signal_id: int,
+        settled_price: float,
+        trader_was_right: bool,
+        roi_if_followed: float,
+        hours_to_resolve: float,
+        now_ts: int,
+    ) -> None:
+        """Зафиксировать рынок как зарезолвленный."""
+        with self._conn() as c:
+            c.execute(
+                """
+                UPDATE signal_outcomes SET
+                    market_resolved = 1,
+                    settled_price = ?,
+                    trader_was_right = ?,
+                    roi_if_followed = ?,
+                    hours_to_resolve = ?,
+                    last_checked_ts = ?
+                WHERE signal_id = ?
+                """,
+                (
+                    settled_price,
+                    1 if trader_was_right else 0,
+                    roi_if_followed,
+                    hours_to_resolve,
+                    now_ts,
+                    signal_id,
+                ),
             )
