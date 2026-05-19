@@ -67,11 +67,25 @@ class PolymarketTracker:
         # Возобновление с последнего сохранённого timestamp
         start_ts = self._get_start_ts()
 
+        if (
+            self.config.shadow_enabled
+            and self.config.shadow_max_volume_24h < self.config.max_market_volume_24h
+        ):
+            log.warning(
+                "SHADOW_MAX_VOLUME_24H ($%.0f) < MAX_MARKET_VOLUME_24H ($%.0f): "
+                "shadow-выборка не накроет все боевые сигналы — увеличь порог",
+                self.config.shadow_max_volume_24h, self.config.max_market_volume_24h,
+            )
+
+        shadow_str = (
+            f"shadow≤${self.config.shadow_max_volume_24h:,.0f}"
+            if self.config.shadow_enabled else "shadow=off"
+        )
         await self.notifier.send_status(
             f"Трекер запущен (Data API). Whitelist: {len(self.watchlist)} адресов. "
             f"MIN_TRADE=${self.config.min_trade_usdc:.0f}, "
             f"MAX_VOL24H=${self.config.max_market_volume_24h:,.0f}, "
-            f"poll={self.config.data_api_poll_interval:.1f}с"
+            f"poll={self.config.data_api_poll_interval:.1f}с, {shadow_str}"
         )
         log.info("=== Tracker started ===")
 
@@ -183,6 +197,58 @@ class PolymarketTracker:
 
         for signal in signals:
             await self._emit_signal(signal)
+
+        # 7. Shadow capture (TODO 0.3): фиксируем сделку для измерения
+        #    false negatives — после отправки сигналов, чтобы запись в
+        #    shadow не задерживала боевой сигнал.
+        self._record_shadow_trade(trade, market, signals)
+
+    def _record_shadow_trade(self, trade: Trade, market, signals: list) -> None:
+        """Shadow capture (TODO 0.3): фиксируем ВСЕ покупки >= MIN_TRADE_USDC
+        на неликвидных рынках — прошли они фильтры Ветки A или нет — чтобы
+        потом измерить false negatives (см. shadow_report.py).
+
+        passed_filters считаем только по Ветке A (suspicious_entry / cluster):
+        именно её фильтры (размер, категория, объём, новизна, цена) мы и
+        проверяем на ложные отсевы. Whitelist (Ветка B) — иной механизм,
+        в passed_filters не учитывается.
+
+        Любая ошибка здесь не должна ломать боевой путь — поэтому глушим.
+        """
+        cfg = self.config
+        if not cfg.shadow_enabled:
+            return
+        if market is None:
+            return  # без метаданных рынка не оценить volume — пропуск
+        if trade.side != "buy":
+            return  # shadow-выборка определена как buy-only (Ветка A — buy-only)
+        if trade.usdc_amount < cfg.min_trade_usdc:
+            return
+        if market.volume_24h > cfg.shadow_max_volume_24h:
+            return
+
+        branch_a = {"suspicious_entry", "cluster"}
+        passed = any(s.signal_type in branch_a for s in signals)
+        types = sorted({s.signal_type for s in signals})
+
+        try:
+            self.storage.save_shadow_trade(
+                tx_hash=trade.tx_hash,
+                maker=trade.maker,
+                token_id=trade.token_id,
+                ts=trade.timestamp,
+                side=trade.side,
+                usdc_amount=trade.usdc_amount,
+                price=trade.price,
+                market_slug=market.slug,
+                category=market.category,
+                volume_24h=market.volume_24h,
+                passed_filters=passed,
+                signal_types=",".join(types) if types else None,
+                now_ts=int(time.time()),
+            )
+        except Exception as e:
+            log.warning("Shadow capture не удался для %s: %s", trade.tx_hash, e)
 
     async def _emit_signal(self, signal: Signal) -> None:
         """Сохранить сигнал в БД и отправить в Telegram."""

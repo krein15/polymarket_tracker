@@ -75,6 +75,14 @@ class Config:
     whitelist_file: str = "whitelist.txt"
     whitelist_min_usdc: float = 200.0
 
+    # Shadow tracker (TODO 0.3): измерение false negatives фильтров Ветки A.
+    # Пишем ВСЕ покупки >= min_trade_usdc на рынках с volume_24h ниже широкого
+    # порога, без боевых фильтров, и сравниваем исход отброшенных с пропущенными.
+    # Порог должен быть >= max_market_volume_24h, иначе shadow-выборка не
+    # накроет все боевые сигналы.
+    shadow_enabled: bool = True
+    shadow_max_volume_24h: float = 500_000.0
+
     # Storage
     db_path: str = "tracker.db"
 
@@ -104,6 +112,12 @@ class Config:
         def _str(key: str, default: str) -> str:
             return os.getenv(key, default)
 
+        def _bool(key: str, default: bool) -> bool:
+            val = os.getenv(key)
+            if val is None or val.strip() == "":
+                return default
+            return val.strip().lower() in ("1", "true", "yes", "on", "да")
+
         ignored = _str("IGNORED_CATEGORIES", "crypto,sports").lower()
         ignored_set = {c.strip() for c in ignored.split(",") if c.strip()}
 
@@ -122,6 +136,8 @@ class Config:
             ignored_categories=ignored_set,
             whitelist_file=_str("WHITELIST_FILE", "whitelist.txt"),
             whitelist_min_usdc=_float("WHITELIST_MIN_USDC", 200.0),
+            shadow_enabled=_bool("SHADOW_ENABLED", True),
+            shadow_max_volume_24h=_float("SHADOW_MAX_VOLUME_24H", 500_000.0),
             db_path=_str("DB_PATH", "tracker.db"),
             log_level=_str("LOG_LEVEL", "INFO"),
             # Legacy (просто чтобы старые .env не ломались)

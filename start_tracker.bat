@@ -1,4 +1,5 @@
 @echo off
+call "%~dp0backup_db.bat"
 chcp 65001 >nul
 cd /d D:\polymarket_tracker_v0.2\polymarket_tracker
 call .venv\Scripts\activate.bat

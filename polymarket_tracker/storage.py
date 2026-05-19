@@ -84,6 +84,49 @@ CREATE INDEX IF NOT EXISTS idx_outcomes_check_queue
 """
 
 
+# Shadow tracker (пункт 0.3): отдельная таблица для ВСЕХ buy >= MIN_TRADE_USDC
+# на рынках ниже широкого порога ликвидности, без боевых фильтров. Объединяет
+# данные сделки и поля резолва в одной таблице (в отличие от signals +
+# signal_outcomes) — shadow рождается сразу с outcome-полями, болванки не нужны.
+SCHEMA_SHADOW = """
+CREATE TABLE IF NOT EXISTS shadow_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tx_hash TEXT NOT NULL,
+    maker TEXT NOT NULL,
+    token_id TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    side TEXT NOT NULL,
+    usdc_amount REAL NOT NULL,
+    price REAL NOT NULL,
+    market_slug TEXT,
+    category TEXT,
+    volume_24h REAL,
+    -- решение боевого детектора по этой сделке (для анализа false negatives):
+    -- passed_filters = 1, если сделка породила сигнал Ветки A
+    -- (suspicious_entry / cluster); 0 — если была бы отброшена.
+    passed_filters INTEGER NOT NULL DEFAULT 0,
+    signal_types TEXT,
+    -- поля резолва (мирроринг signal_outcomes)
+    price_1h REAL,
+    price_24h REAL,
+    price_7d REAL,
+    max_price_reached REAL,
+    min_price_reached REAL,
+    market_resolved INTEGER NOT NULL DEFAULT 0,
+    settled_price REAL,
+    trader_was_right INTEGER,
+    roi_if_followed REAL,
+    hours_to_resolve REAL,
+    last_checked_ts INTEGER,
+    created_ts INTEGER NOT NULL,
+    UNIQUE (tx_hash, maker, token_id)
+);
+CREATE INDEX IF NOT EXISTS idx_shadow_check_queue
+    ON shadow_trades(market_resolved, last_checked_ts);
+CREATE INDEX IF NOT EXISTS idx_shadow_ts ON shadow_trades(ts);
+"""
+
+
 @dataclass
 class WalletStats:
     address: str
@@ -106,6 +149,7 @@ class Storage:
         with self._conn() as c:
             c.executescript(SCHEMA)
             c.executescript(SCHEMA_OUTCOMES)
+            c.executescript(SCHEMA_SHADOW)
             # Идемпотентная миграция: добавить signals.side, если ещё нет.
             # Все старые сигналы — это buy (другая сторона ранее не реализовывалась).
             try:
@@ -430,3 +474,217 @@ class Storage:
                     signal_id,
                 ),
             )
+
+    # ───────── Maintenance (пункт 0.2 TODO) ─────────
+
+    def count_trades(self) -> int:
+        """Сколько строк в trades — для отчётности обслуживания."""
+        with self._conn() as c:
+            return c.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+
+    def prune_old_trades(
+        self, older_than_days: int = 7, now: Optional[int] = None
+    ) -> int:
+        """Удалить строки trades старше older_than_days дней.
+
+        Таблица trades нужна только для cluster-детекции и подсчёта свежих
+        кошельков на токене — оба смотрят максимум на последний час
+        (cluster_window_seconds). Историю можно безопасно удалять:
+
+          * агрегаты в wallets (trade_count, first_seen_ts, total_volume_usdc)
+            хранятся отдельно и НЕ пересчитываются из trades;
+          * signals / signal_outcomes таблицу trades не читают.
+
+        VACUUM здесь НЕ вызывается — место на диске вернёт отдельный vacuum()
+        (его нельзя запускать внутри транзакции). Возвращает число удалённых
+        строк.
+        """
+        now = now if now is not None else int(time.time())
+        cutoff = now - older_than_days * 86400
+        with self._conn() as c:
+            cur = c.execute("DELETE FROM trades WHERE ts < ?", (cutoff,))
+            return cur.rowcount or 0
+
+    def vacuum(self) -> None:
+        """Дефрагментировать БД и вернуть свободные страницы ОС.
+
+        VACUUM не может выполняться внутри транзакции, поэтому открываем
+        отдельное соединение в autocommit-режиме (isolation_level=None).
+        Требует эксклюзивного доступа — запускать при ОСТАНОВЛЕННОМ трекере,
+        иначе sqlite3 кинет 'database is locked'.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30.0, isolation_level=None)
+        try:
+            conn.execute("VACUUM")
+        finally:
+            conn.close()
+
+    # ───────── Shadow tracker (пункт 0.3) ─────────
+
+    def save_shadow_trade(
+        self,
+        tx_hash: str,
+        maker: str,
+        token_id: str,
+        ts: int,
+        side: str,
+        usdc_amount: float,
+        price: float,
+        market_slug: Optional[str],
+        category: Optional[str],
+        volume_24h: Optional[float],
+        passed_filters: bool,
+        signal_types: Optional[str],
+        now_ts: int,
+    ) -> bool:
+        """Записать сделку в shadow_trades. Возвращает True если новая (не дубль).
+
+        passed_filters — породила ли сделка сигнал Ветки A (suspicious_entry /
+        cluster). signal_types — comma-joined список типов сигналов или None.
+        volume_24h может быть 0/None для рынков, по которым Gamma промахнулась.
+        """
+        with self._conn() as c:
+            try:
+                c.execute(
+                    """
+                    INSERT INTO shadow_trades
+                    (tx_hash, maker, token_id, ts, side, usdc_amount, price,
+                     market_slug, category, volume_24h, passed_filters,
+                     signal_types, created_ts)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        tx_hash, maker.lower(), token_id, ts, side, usdc_amount,
+                        price, market_slug, category, volume_24h,
+                        1 if passed_filters else 0, signal_types, now_ts,
+                    ),
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
+    def get_shadow_to_update(self, limit: int = 100) -> list[dict]:
+        """Незакрытые shadow-сделки для проверки резолва.
+
+        Ключи dict-ов совместимы с get_outcomes_to_update (id назван
+        shadow_id, цена входа — price_at_signal, ts сделки — signal_ts),
+        чтобы outcome_tracker мог переиспользовать общий обработчик батча.
+        Сортировка: дольше всех не проверявшиеся первыми.
+        """
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT
+                    id AS shadow_id,
+                    token_id,
+                    side,
+                    price AS price_at_signal,
+                    ts AS signal_ts,
+                    last_checked_ts,
+                    (price_1h IS NOT NULL) AS has_price_1h,
+                    (price_24h IS NOT NULL) AS has_price_24h,
+                    (price_7d IS NOT NULL) AS has_price_7d
+                FROM shadow_trades
+                WHERE market_resolved = 0
+                ORDER BY
+                    CASE WHEN last_checked_ts IS NULL THEN 0 ELSE 1 END,
+                    last_checked_ts ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_shadow_snapshots(
+        self,
+        shadow_id: int,
+        now_ts: int,
+        current_price: Optional[float],
+        set_price_1h: bool = False,
+        set_price_24h: bool = False,
+        set_price_7d: bool = False,
+    ) -> None:
+        """Обновить snapshot-поля незакрытой shadow-сделки.
+
+        Мирроринг update_outcome_snapshots для таблицы shadow_trades.
+        last_checked_ts обновляется всегда, даже при current_price=None.
+        """
+        with self._conn() as c:
+            if current_price is None:
+                c.execute(
+                    "UPDATE shadow_trades SET last_checked_ts = ? WHERE id = ?",
+                    (now_ts, shadow_id),
+                )
+                return
+
+            sets = ["last_checked_ts = ?"]
+            params: list = [now_ts]
+
+            sets.append(
+                "max_price_reached = CASE "
+                "WHEN max_price_reached IS NULL OR ? > max_price_reached THEN ? "
+                "ELSE max_price_reached END"
+            )
+            params.extend([current_price, current_price])
+            sets.append(
+                "min_price_reached = CASE "
+                "WHEN min_price_reached IS NULL OR ? < min_price_reached THEN ? "
+                "ELSE min_price_reached END"
+            )
+            params.extend([current_price, current_price])
+
+            if set_price_1h:
+                sets.append("price_1h = COALESCE(price_1h, ?)")
+                params.append(current_price)
+            if set_price_24h:
+                sets.append("price_24h = COALESCE(price_24h, ?)")
+                params.append(current_price)
+            if set_price_7d:
+                sets.append("price_7d = COALESCE(price_7d, ?)")
+                params.append(current_price)
+
+            params.append(shadow_id)
+            c.execute(
+                f"UPDATE shadow_trades SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+
+    def finalize_shadow_outcome(
+        self,
+        shadow_id: int,
+        settled_price: float,
+        trader_was_right: bool,
+        roi_if_followed: float,
+        hours_to_resolve: float,
+        now_ts: int,
+    ) -> None:
+        """Зафиксировать shadow-сделку как зарезолвленную.
+
+        Мирроринг finalize_outcome для таблицы shadow_trades.
+        """
+        with self._conn() as c:
+            c.execute(
+                """
+                UPDATE shadow_trades SET
+                    market_resolved = 1,
+                    settled_price = ?,
+                    trader_was_right = ?,
+                    roi_if_followed = ?,
+                    hours_to_resolve = ?,
+                    last_checked_ts = ?
+                WHERE id = ?
+                """,
+                (
+                    settled_price,
+                    1 if trader_was_right else 0,
+                    roi_if_followed,
+                    hours_to_resolve,
+                    now_ts,
+                    shadow_id,
+                ),
+            )
+
+    def count_shadow_trades(self) -> int:
+        """Сколько строк в shadow_trades — для статистики/отчётности."""
+        with self._conn() as c:
+            return c.execute("SELECT COUNT(*) FROM shadow_trades").fetchone()[0]
