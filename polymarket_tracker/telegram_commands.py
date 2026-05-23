@@ -41,6 +41,49 @@ MAX_LIST_ITEMS = 15
 VALID_SIGNAL_TYPES = {"cluster", "suspicious_entry", "whitelist"}
 
 
+# ───────── Metrics (TODO 2.1) ─────────
+# Хелперы дублированы со stats.py: stats — отдельный standalone-скрипт,
+# не импортирующий пакет, поэтому держим обе копии. Изменения должны
+# идти в обе стороны.
+
+def _median(values):
+    if not values:
+        return None
+    s = sorted(values)
+    n = len(s)
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+
+def _breakeven_wr_row(price, side):
+    """Per-row breakeven winrate: p для buy, 1-p для sell.
+    Усреднение по группе → агрегатный need_wr, корректный для смешанных
+    buy/sell выборок на бинарных рынках."""
+    if price is None:
+        return None
+    return 1.0 - price if side == "sell" else price
+
+
+def aggregate_resolved(rows):
+    """rows: список объектов с price/side/trader_was_right/roi_if_followed.
+    Возвращает {n, wins, winrate, breakeven_wr, mean_roi, median_roi}."""
+    n = len(rows)
+    wins = sum(1 for r in rows if r["trader_was_right"])
+    rois = [r["roi_if_followed"] for r in rows if r["roi_if_followed"] is not None]
+    bes = [
+        b for b in (_breakeven_wr_row(r["price"], r["side"]) for r in rows)
+        if b is not None
+    ]
+    return {
+        "n": n,
+        "wins": wins,
+        "winrate": wins / n if n else None,
+        "breakeven_wr": sum(bes) / len(bes) if bes else None,
+        "mean_roi": sum(rois) / len(rois) if rois else None,
+        "median_roi": _median(rois),
+    }
+
+
 class TelegramCommandHandler:
     def __init__(self, config: Config, storage: Storage):
         self.config = config
@@ -288,6 +331,21 @@ class TelegramCommandHandler:
         type_summary = ", ".join(f"{k}: {v}" for k, v in sorted(by_type.items()))
         lines.append(f"Всего: {total}  ({type_summary})")
         lines.append(f"✅ wins: {len(wins)}  ✗ loses: {len(loses)}  ⏳ open: {len(opens)}")
+
+        # Сводка по resolved: winrate vs breakeven + mean/median ROI (TODO 2.1).
+        resolved_rows = wins + loses
+        if resolved_rows:
+            agg = aggregate_resolved(resolved_rows)
+            need_s = (f"{agg['breakeven_wr']*100:.1f}%"
+                      if agg['breakeven_wr'] is not None else "—")
+            mean_s = (f"{agg['mean_roi']*100:+.1f}%"
+                      if agg['mean_roi'] is not None else "—")
+            med_s = (f"{agg['median_roi']*100:+.1f}%"
+                     if agg['median_roi'] is not None else "—")
+            lines.append(
+                f"wr {agg['winrate']*100:.1f}%/need {need_s}, "
+                f"mean {mean_s}/med {med_s}"
+            )
         lines.append("")
 
         def fmt_signal(r, with_outcome: bool) -> str:
@@ -388,33 +446,57 @@ class TelegramCommandHandler:
             params = [type_filter]
 
         with self.storage._conn() as c:
-            total = c.execute("SELECT COUNT(*) FROM signals s WHERE 1=1" + extra_where, params).fetchone()[0]
-            resolved = c.execute(
-                "SELECT COUNT(*) FROM signals s JOIN signal_outcomes o ON o.signal_id=s.id "
-                "WHERE o.market_resolved=1" + extra_where, params).fetchone()[0]
-            by_type = c.execute(f"""
-                SELECT s.signal_type, COUNT(*) AS n,
-                       SUM(CASE WHEN o.market_resolved=1 THEN 1 ELSE 0 END) AS res,
-                       SUM(CASE WHEN o.trader_was_right=1 THEN 1 ELSE 0 END) AS wins,
-                       AVG(CASE WHEN o.market_resolved=1 THEN o.roi_if_followed END) AS roi
-                FROM signals s
-                LEFT JOIN signal_outcomes o ON o.signal_id = s.id
-                WHERE 1=1 {extra_where}
-                GROUP BY s.signal_type ORDER BY n DESC
+            total = c.execute(
+                "SELECT COUNT(*) FROM signals s WHERE 1=1" + extra_where, params
+            ).fetchone()[0]
+            # n по типу (включая открытые) — для отображения "X из Y".
+            type_counts = c.execute(f"""
+                SELECT s.signal_type, COUNT(*) AS n FROM signals s
+                WHERE 1=1 {extra_where} GROUP BY s.signal_type
             """, params).fetchall()
+            # Raw resolved-строки: median и breakeven считаем в Python,
+            # SQL не умеет MEDIAN из коробки.
+            raw = c.execute(f"""
+                SELECT s.signal_type, s.price, s.side,
+                       o.trader_was_right, o.roi_if_followed
+                FROM signals s JOIN signal_outcomes o ON o.signal_id = s.id
+                WHERE o.market_resolved = 1 {extra_where}
+            """, params).fetchall()
+
+        by_type: dict = {}
+        for r in raw:
+            by_type.setdefault(r["signal_type"], []).append(r)
+
+        total_per_type = {r["signal_type"]: r["n"] for r in type_counts}
+        resolved_total = len(raw)
 
         title = "<b>Общая сводка"
         if type_filter:
             title += f" · {type_filter}"
         title += "</b>"
-        lines = [title, f"Всего сигналов: {total}", f"Резолвлено: {resolved}", ""]
+        lines = [title, f"Всего сигналов: {total}",
+                 f"Резолвлено: {resolved_total}", ""]
         lines.append("<b>По типам:</b>")
-        for r in by_type:
-            wr = f"{r['wins']/r['res']*100:.1f}%" if r["res"] else "—"
-            roi = f"{r['roi']*100:+.1f}%" if r["roi"] is not None else "—"
+        type_order = sorted(total_per_type.keys(), key=lambda k: -total_per_type[k])
+        if not type_order:
+            lines.append("  (нет сигналов)")
+        for stype in type_order:
+            n_total = total_per_type[stype]
+            group = by_type.get(stype, [])
+            if not group:
+                lines.append(f"  {stype}: {n_total} (res 0, нет данных)")
+                continue
+            agg = aggregate_resolved(group)
+            wr_s = f"{agg['winrate']*100:.1f}%"
+            need_s = (f"{agg['breakeven_wr']*100:.1f}%"
+                      if agg['breakeven_wr'] is not None else "—")
+            mean_s = (f"{agg['mean_roi']*100:+.1f}%"
+                      if agg['mean_roi'] is not None else "—")
+            med_s = (f"{agg['median_roi']*100:+.1f}%"
+                     if agg['median_roi'] is not None else "—")
             lines.append(
-                f"  {r['signal_type']}: {r['n']} (res {r['res']}, "
-                f"wr {wr}, ROI {roi})"
+                f"  {stype}: {n_total} (res {agg['n']}, "
+                f"wr {wr_s}/need {need_s}, mean {mean_s}/med {med_s})"
             )
         return self._truncate("\n".join(lines))
 

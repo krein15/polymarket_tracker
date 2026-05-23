@@ -23,6 +23,60 @@ from datetime import datetime, timezone
 from typing import Optional
 
 
+# ───────── Metrics (TODO 2.1) ─────────
+
+def median(values: list) -> Optional[float]:
+    """Медиана списка чисел. None если пусто."""
+    if not values:
+        return None
+    s = sorted(values)
+    n = len(s)
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+
+def breakeven_wr_row(price: Optional[float], side: Optional[str]) -> Optional[float]:
+    """Брейк-ивен winrate для одной сделки 1 share на бинарном рынке.
+
+    BUY  по цене p: профит +(1-p) при win, -p при lose. На равных стейках
+                    брейк-ивен на портфеле buys → wr ≈ mean(p).
+    SELL по цене p: профит +p при win (settled<p), -(1-p) при lose.
+                    Брейк-ивен → wr ≈ 1 - mean(p).
+    Возвращает per-row значение; усредняем по группе → агрегатный need_wr,
+    корректный и для смешанных buy/sell выборок.
+    """
+    if price is None:
+        return None
+    return 1.0 - price if side == "sell" else price
+
+
+def aggregate_resolved(rows) -> dict:
+    """Свести список resolved-строк в метрики.
+
+    rows: sqlite3.Row с полями price, side, trader_was_right, roi_if_followed.
+    Все строки уже должны быть resolved (вызывающий отфильтровал).
+    """
+    n = len(rows)
+    wins = sum(1 for r in rows if r["trader_was_right"])
+    rois = [r["roi_if_followed"] for r in rows if r["roi_if_followed"] is not None]
+    bes = [
+        b for b in (breakeven_wr_row(r["price"], r["side"]) for r in rows)
+        if b is not None
+    ]
+    return {
+        "n": n,
+        "wins": wins,
+        "winrate": wins / n if n else None,
+        "breakeven_wr": sum(bes) / len(bes) if bes else None,
+        "mean_roi": sum(rois) / len(rois) if rois else None,
+        "median_roi": median(rois),
+    }
+
+
+def fmt_wr(wr: Optional[float]) -> str:
+    return f"{wr * 100:5.1f}%" if wr is not None else "  -  "
+
+
 # ───────── Helpers ─────────
 
 def open_db(path: str) -> sqlite3.Connection:
@@ -124,39 +178,45 @@ def cmd_overview(c: sqlite3.Connection, args) -> None:
     print(f"  open:      {n_open:>5}  ({fmt_pct(n_open, n_outcomes)})")
     print(f"  no data:   {n_no_data:>5}  ({fmt_pct(n_no_data, n_outcomes)})  ← нет ответа от Gamma")
 
-    # По типу
+    # По типу + По side: тянем raw rows один раз, агрегируем в Python —
+    # SQL не умеет MEDIAN, а нам нужны mean/median ROI + breakeven_wr.
     where, params = signal_filter_clause(args.signal_type)
-    header("По типу сигнала (только resolved)")
-    print(f"  {'тип':<20} {'n':>4} {'wins':>5} {'wr':>7} {'ROI':>7} {'avg_hrs':>8}")
-    rows = c.execute(f"""
-        SELECT s.signal_type,
-               COUNT(*) AS n,
-               SUM(o.trader_was_right) AS wins,
-               AVG(o.roi_if_followed) AS roi,
-               AVG(o.hours_to_resolve) AS hrs
+    raw = c.execute(f"""
+        SELECT s.signal_type, s.price, s.side,
+               o.trader_was_right, o.roi_if_followed, o.hours_to_resolve
         FROM signals s
         JOIN signal_outcomes o ON o.signal_id = s.id
         WHERE o.market_resolved = 1 {where}
-        GROUP BY s.signal_type
-        ORDER BY n DESC
     """, params).fetchall()
-    for r in rows:
-        wr = fmt_pct(r["wins"] or 0, r["n"])
-        print(f"  {r['signal_type']:<20} {r['n']:>4} {r['wins'] or 0:>5} {wr:>7} {fmt_roi(r['roi']):>7} {r['hrs']:>7.1f}h")
 
-    # По side
+    by_type: dict = {}
+    by_side: dict = {}
+    for r in raw:
+        by_type.setdefault(r["signal_type"], []).append(r)
+        by_side.setdefault(r["side"] or "?", []).append(r)
+
+    header("По типу сигнала (только resolved)")
+    print(f"  {'тип':<20} {'n':>4} {'wins':>5} {'wr':>7} {'need':>7} "
+          f"{'mean':>8} {'med':>8} {'avg_hrs':>8}")
+    for stype in sorted(by_type, key=lambda k: -len(by_type[k])):
+        group = by_type[stype]
+        agg = aggregate_resolved(group)
+        hrs_vals = [r["hours_to_resolve"] for r in group if r["hours_to_resolve"] is not None]
+        avg_hrs = sum(hrs_vals) / len(hrs_vals) if hrs_vals else 0
+        print(f"  {stype:<20} {agg['n']:>4} {agg['wins']:>5} "
+              f"{fmt_wr(agg['winrate']):>7} {fmt_wr(agg['breakeven_wr']):>7} "
+              f"{fmt_roi(agg['mean_roi']):>8} {fmt_roi(agg['median_roi']):>8} "
+              f"{avg_hrs:>7.1f}h")
+
     header("По side (только resolved)")
-    print(f"  {'side':<6} {'n':>4} {'wins':>5} {'wr':>7} {'ROI':>7}")
-    rows = c.execute(f"""
-        SELECT s.side, COUNT(*) AS n, SUM(o.trader_was_right) AS wins, AVG(o.roi_if_followed) AS roi
-        FROM signals s
-        JOIN signal_outcomes o ON o.signal_id = s.id
-        WHERE o.market_resolved = 1 {where}
-        GROUP BY s.side
-    """, params).fetchall()
-    for r in rows:
-        wr = fmt_pct(r["wins"] or 0, r["n"])
-        print(f"  {r['side']:<6} {r['n']:>4} {r['wins'] or 0:>5} {wr:>7} {fmt_roi(r['roi']):>7}")
+    print(f"  {'side':<6} {'n':>4} {'wins':>5} {'wr':>7} {'need':>7} "
+          f"{'mean':>8} {'med':>8}")
+    for side in sorted(by_side, key=lambda k: -len(by_side[k])):
+        group = by_side[side]
+        agg = aggregate_resolved(group)
+        print(f"  {side:<6} {agg['n']:>4} {agg['wins']:>5} "
+              f"{fmt_wr(agg['winrate']):>7} {fmt_wr(agg['breakeven_wr']):>7} "
+              f"{fmt_roi(agg['mean_roi']):>8} {fmt_roi(agg['median_roi']):>8}")
 
     # Активность по последним окнам
     header("Сигналы за последние окна")
@@ -179,35 +239,36 @@ def cmd_addresses(c: sqlite3.Connection, args) -> None:
         where = " AND s.signal_type = 'whitelist'"
         params = []
 
-    header(title)
-    print(f"  {'address':<14} {'n':>4} {'res':>4} {'wins':>5} {'wr':>7} {'ROI':>8} {'volume':>10}")
     rows = c.execute(f"""
-        SELECT s.maker,
-               COUNT(*) AS n,
-               SUM(CASE WHEN o.market_resolved=1 THEN 1 ELSE 0 END) AS resolved,
-               SUM(CASE WHEN o.trader_was_right=1 THEN 1 ELSE 0 END) AS wins,
-               AVG(CASE WHEN o.market_resolved=1 THEN o.roi_if_followed END) AS roi,
-               SUM(s.usdc_amount) AS vol
+        SELECT s.maker, s.price, s.side, s.usdc_amount,
+               o.market_resolved, o.trader_was_right, o.roi_if_followed
         FROM signals s
         LEFT JOIN signal_outcomes o ON o.signal_id = s.id
         WHERE 1=1 {where}
-        GROUP BY s.maker
-        ORDER BY n DESC
     """, params).fetchall()
 
-    if not rows:
+    by_addr: dict = {}
+    for r in rows:
+        by_addr.setdefault(r["maker"], []).append(r)
+
+    header(title)
+    print(f"  {'address':<14} {'n':>4} {'res':>4} {'wins':>5} {'wr':>7} {'need':>7} "
+          f"{'mean':>8} {'med':>8} {'volume':>10}")
+
+    if not by_addr:
         print("  (нет сигналов)")
         return
 
-    for r in rows:
-        addr = r["maker"]
+    for addr, group in sorted(by_addr.items(), key=lambda kv: -len(kv[1])):
         addr_short = f"{addr[:8]}..{addr[-4:]}"
-        resolved = r["resolved"] or 0
-        wins = r["wins"] or 0
-        wr = fmt_pct(wins, resolved) if resolved else "  -  "
-        roi = fmt_roi(r["roi"])
-        vol = f"${r['vol']:>8,.0f}"
-        print(f"  {addr_short:<14} {r['n']:>4} {resolved:>4} {wins:>5} {wr:>7} {roi:>8} {vol:>10}")
+        n_total = len(group)
+        resolved_rows = [r for r in group if r["market_resolved"]]
+        agg = aggregate_resolved(resolved_rows)
+        vol = sum(r["usdc_amount"] for r in group)
+        print(f"  {addr_short:<14} {n_total:>4} {agg['n']:>4} {agg['wins']:>5} "
+              f"{fmt_wr(agg['winrate']):>7} {fmt_wr(agg['breakeven_wr']):>7} "
+              f"{fmt_roi(agg['mean_roi']):>8} {fmt_roi(agg['median_roi']):>8} "
+              f"${vol:>7,.0f}")
 
     print()
     print("  Подсказка: для расширенной выборки по конкретному адресу:")
@@ -216,60 +277,70 @@ def cmd_addresses(c: sqlite3.Connection, args) -> None:
 
 def cmd_by_day(c: sqlite3.Connection, args) -> None:
     where, params = signal_filter_clause(args.signal_type)
-
-    header("По дням")
-    print(f"  {'date':<10} {'n':>4} {'res':>4} {'wins':>5} {'wr':>7} {'ROI':>8}")
     rows = c.execute(f"""
-        SELECT date(s.ts, 'unixepoch') AS day,
-               COUNT(*) AS n,
-               SUM(CASE WHEN o.market_resolved=1 THEN 1 ELSE 0 END) AS resolved,
-               SUM(CASE WHEN o.trader_was_right=1 THEN 1 ELSE 0 END) AS wins,
-               AVG(CASE WHEN o.market_resolved=1 THEN o.roi_if_followed END) AS roi
+        SELECT s.ts, s.price, s.side,
+               o.market_resolved, o.trader_was_right, o.roi_if_followed
         FROM signals s
         LEFT JOIN signal_outcomes o ON o.signal_id = s.id
         WHERE 1=1 {where}
-        GROUP BY day
-        ORDER BY day DESC
     """, params).fetchall()
+
+    by_day: dict = {}
     for r in rows:
-        resolved = r["resolved"] or 0
-        wins = r["wins"] or 0
-        wr = fmt_pct(wins, resolved) if resolved else "  -  "
-        print(f"  {r['day']:<10} {r['n']:>4} {resolved:>4} {wins:>5} {wr:>7} {fmt_roi(r['roi']):>8}")
+        day = datetime.fromtimestamp(r["ts"], timezone.utc).strftime("%Y-%m-%d")
+        by_day.setdefault(day, []).append(r)
+
+    header("По дням")
+    print(f"  {'date':<10} {'n':>4} {'res':>4} {'wins':>5} {'wr':>7} {'need':>7} "
+          f"{'mean':>8} {'med':>8}")
+    for day in sorted(by_day.keys(), reverse=True):
+        group = by_day[day]
+        n_total = len(group)
+        resolved_rows = [r for r in group if r["market_resolved"]]
+        agg = aggregate_resolved(resolved_rows)
+        print(f"  {day:<10} {n_total:>4} {agg['n']:>4} {agg['wins']:>5} "
+              f"{fmt_wr(agg['winrate']):>7} {fmt_wr(agg['breakeven_wr']):>7} "
+              f"{fmt_roi(agg['mean_roi']):>8} {fmt_roi(agg['median_roi']):>8}")
 
 
 def cmd_by_size(c: sqlite3.Connection, args) -> None:
     where, params = signal_filter_clause(args.signal_type)
-
-    header("По корзинам размера сделки")
-    # Корзины: <500, 500-1k, 1k-5k, 5k-25k, 25k+
-    print(f"  {'bucket':<14} {'n':>4} {'res':>4} {'wins':>5} {'wr':>7} {'ROI':>8} {'avg':>10}")
     rows = c.execute(f"""
-        SELECT
-            CASE
-                WHEN s.usdc_amount < 500 THEN '1) <$500'
-                WHEN s.usdc_amount < 1000 THEN '2) $500-1k'
-                WHEN s.usdc_amount < 5000 THEN '3) $1k-5k'
-                WHEN s.usdc_amount < 25000 THEN '4) $5k-25k'
-                ELSE '5) $25k+'
-            END AS bucket,
-            COUNT(*) AS n,
-            SUM(CASE WHEN o.market_resolved=1 THEN 1 ELSE 0 END) AS resolved,
-            SUM(CASE WHEN o.trader_was_right=1 THEN 1 ELSE 0 END) AS wins,
-            AVG(CASE WHEN o.market_resolved=1 THEN o.roi_if_followed END) AS roi,
-            AVG(s.usdc_amount) AS avg_size
+        SELECT s.usdc_amount, s.price, s.side,
+               o.market_resolved, o.trader_was_right, o.roi_if_followed
         FROM signals s
         LEFT JOIN signal_outcomes o ON o.signal_id = s.id
         WHERE 1=1 {where}
-        GROUP BY bucket
-        ORDER BY bucket
     """, params).fetchall()
+
+    def bucket(usdc: float) -> str:
+        if usdc < 500:
+            return "1) <$500"
+        if usdc < 1000:
+            return "2) $500-1k"
+        if usdc < 5000:
+            return "3) $1k-5k"
+        if usdc < 25000:
+            return "4) $5k-25k"
+        return "5) $25k+"
+
+    by_bucket: dict = {}
     for r in rows:
-        resolved = r["resolved"] or 0
-        wins = r["wins"] or 0
-        wr = fmt_pct(wins, resolved) if resolved else "  -  "
-        print(f"  {r['bucket']:<14} {r['n']:>4} {resolved:>4} {wins:>5} {wr:>7} "
-              f"{fmt_roi(r['roi']):>8} ${r['avg_size']:>7,.0f}")
+        by_bucket.setdefault(bucket(r["usdc_amount"]), []).append(r)
+
+    header("По корзинам размера сделки")
+    print(f"  {'bucket':<14} {'n':>4} {'res':>4} {'wins':>5} {'wr':>7} {'need':>7} "
+          f"{'mean':>8} {'med':>8} {'avg':>10}")
+    for b in sorted(by_bucket.keys()):
+        group = by_bucket[b]
+        n_total = len(group)
+        resolved_rows = [r for r in group if r["market_resolved"]]
+        agg = aggregate_resolved(resolved_rows)
+        avg_size = sum(r["usdc_amount"] for r in group) / n_total if n_total else 0
+        print(f"  {b:<14} {n_total:>4} {agg['n']:>4} {agg['wins']:>5} "
+              f"{fmt_wr(agg['winrate']):>7} {fmt_wr(agg['breakeven_wr']):>7} "
+              f"{fmt_roi(agg['mean_roi']):>8} {fmt_roi(agg['median_roi']):>8} "
+              f"${avg_size:>7,.0f}")
 
 
 def cmd_recent(c: sqlite3.Connection, args) -> None:
