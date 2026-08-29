@@ -32,12 +32,34 @@ class MarketInfo:
     end_date_iso: Optional[str]
     outcome: str  # "Yes" / "No" / название outcome соответствующее token_id
     closed: bool
+    # Слаги тегов Gamma (esports, sports, politics, crypto, ...). Именно по ним
+    # работает фильтр категорий: поле category у Gamma больше не заполняется.
+    tags: frozenset = frozenset()
     # Поля для outcome-трекера (фаза 1.2)
     last_trade_price: Optional[float] = None  # текущая цена нашего token_id
     settled_price: Optional[float] = None  # финальная цена нашего token_id (если closed)
 
     def url(self) -> str:
         return f"https://polymarket.com/event/{self.slug}"
+
+
+# Крупные категории в порядке приоритета: рынок обычно несёт несколько тегов
+# (например {primaries, united-states, politics, elections, earn-4}), и для
+# отчётов нужен один осмысленный. Теги вроде earn-* — промо-метки Polymarket,
+# темы рынка они не описывают.
+_MAJOR_CATEGORIES = (
+    "sports", "crypto", "politics", "elections", "geopolitics", "world",
+    "economy", "business", "tech", "science", "culture", "pop-culture",
+)
+
+
+def _category_from_tags(tag_slugs: frozenset) -> str:
+    """Одна читаемая категория из набора тегов Gamma."""
+    for major in _MAJOR_CATEGORIES:
+        if major in tag_slugs:
+            return major
+    meaningful = sorted(s for s in tag_slugs if not s.startswith("earn"))
+    return meaningful[0] if meaningful else ""
 
 
 class MarketContext:
@@ -120,7 +142,9 @@ class MarketContext:
             self._session = self._make_session()
 
         url = f"{GAMMA_API_BASE}/markets"
-        params: dict = {"clob_token_ids": token_id, "limit": 1}
+        # include_tag=true — иначе Gamma не отдаёт теги, а поле category у неё
+        # давно пустое, и фильтр категорий оказывается мёртвым.
+        params: dict = {"clob_token_ids": token_id, "limit": 1, "include_tag": "true"}
         if include_closed:
             params["closed"] = "true"
 
@@ -185,13 +209,22 @@ class MarketContext:
             except ValueError:
                 pass
 
-            # Категория — может быть в events[0].category или просто .category
+            # Категория. Историческое поле category Gamma больше не заполняет
+            # (проверено на живом API: null и у рынка, и у события), поэтому
+            # основной источник — слаги тегов, отдаваемые при include_tag=true.
+            tag_slugs = frozenset(
+                str(tag.get("slug", "")).lower().strip()
+                for tag in (m.get("tags") or [])
+                if isinstance(tag, dict) and tag.get("slug")
+            )
             category = m.get("category", "") or ""
             if not category:
                 events = m.get("events", [])
                 if events and isinstance(events, list):
                     category = events[0].get("category", "") or ""
             category = category.lower().strip()
+            if not category and tag_slugs:
+                category = _category_from_tags(tag_slugs)
 
             # Текущая цена нашего token_id. Gamma отдаёт массив outcomePrices
             # выровненный по clobTokenIds — если есть, берём по индексу нашего токена.
@@ -233,6 +266,7 @@ class MarketContext:
                 question=m.get("question", "")[:200],
                 slug=m.get("slug", ""),
                 category=category,
+                tags=tag_slugs,
                 volume_24h=float(m.get("volume24hr", 0) or 0),
                 volume_total=float(m.get("volume", 0) or 0),
                 liquidity=float(m.get("liquidity", 0) or 0),

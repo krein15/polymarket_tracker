@@ -135,7 +135,10 @@ class AnomalyDetector:
         if market.closed:
             return False
 
-        if market.category in cfg.ignored_categories:
+        # Сверяем и category, и теги: у Gamma рынок LoL приходит с тегами
+        # {esports, league-of-legends, games, sports} — по одному лишь
+        # category="esports" фильтр "sports" его не поймает.
+        if cfg.ignored_categories & ({market.category} | set(market.tags)):
             return False
 
         if market.volume_24h > cfg.max_market_volume_24h:
