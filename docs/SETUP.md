@@ -44,16 +44,15 @@ Email — тот же, что в аккаунте GitHub.
 
 ### 1.5 Залить проект
 
-Локальный репозиторий **уже инициализирован** (29.08.2026, ветка `main`),
-так что осталось только привязать GitHub:
+Проект уже лежит в приватном репозитории
+<https://github.com/krein15/polymarket_tracker>, remote привязан — шаги 1.1–1.4
+нужны только при развёртывании на чистой машине. Там же вместо них:
 
 ```cmd
-cd C:\путь\до\Polymarket_tracker
-git remote add origin https://github.com/USER/polymarket_tracker.git
-git push -u origin main
+git clone https://github.com/krein15/polymarket_tracker.git
 ```
 
-Если разворачиваешь проект с нуля на чистой машине и репозитория ещё нет —
+Если делаешь новый репозиторий с нуля —
 за это отвечает `scripts\git_init.bat <URL>`: он сделает `git init`,
 `git add -A`, покажет список файлов и **остановится на паузе** — проверь
 глазами, что в списке НЕТ `.env`, `data/tracker.db`, `.venv`. Если они там
