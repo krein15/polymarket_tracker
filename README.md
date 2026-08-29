@@ -2,6 +2,21 @@
 
 > Отдельный от торгового бота проект. Слушает сделки Polymarket через официальный Data API, детектит подозрительную активность, шлёт сигналы в Telegram.
 
+**Куда смотреть:**
+
+| Вопрос | Файл |
+|---|---|
+| На чём остановились, что работает, что делать первым | [docs/STATE.md](docs/STATE.md) |
+| Что сделано и какой план дальше | [docs/ROADMAP.md](docs/ROADMAP.md) |
+| Установка с нуля на новом ПК + git | [docs/SETUP.md](docs/SETUP.md) |
+| Как всё устроено и какие есть параметры | этот файл |
+
+**Быстрый старт** (venv уже создан, `.env` заполнен):
+
+```cmd
+scripts\start_tracker.bat
+```
+
 ## Что изменилось в v0.2
 
 В v0.1 трекер читал блокчейн напрямую (eth_getLogs на CTF Exchange V1 контрактах). **28 апреля 2026 Polymarket мигрировал на CTFv2** — старые контракты прекратили активную работу, новые имеют другую структуру (PMCT collateral, переписанный Order struct).
@@ -23,7 +38,7 @@ v0.2 переписан на **Polymarket Data API** (`https://data-api.polymark
 - **maker "новый"** (< N сделок И < M дней) **ИЛИ кластер** (≥ K новых кошельков на этом рынке за час)
 
 **Ветка B — "Whitelist"** (copy-trading):
-- `maker ∈ whitelist.txt`
+- `maker ∈ data/whitelist.txt`
 - размер ≥ `WHITELIST_MIN_USDC`
 
 Обе ветки работают параллельно — одна сделка может вызвать оба сигнала.
@@ -48,11 +63,10 @@ v0.2 переписан на **Polymarket Data API** (`https://data-api.polymark
 
 ### 1. Зависимости
 
-```bash
-cd polymarket_tracker
-python -m venv .venv
-source .venv/bin/activate    # Linux/Mac
-# .venv\Scripts\activate     # Windows
+```cmd
+cd C:\путь\до\Polymarket_tracker
+py -3.12 -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -71,8 +85,9 @@ pip install -r requirements.txt
 
 ### 3. Настройка .env
 
-```bash
-cp .env.example .env
+```cmd
+copy .env.example .env
+notepad .env
 ```
 
 Минимум, что нужно заполнить:
@@ -86,9 +101,12 @@ TELEGRAM_CHAT_ID=<chat_id из getUpdates>
 
 ### 4. Запуск
 
-```bash
+```cmd
 python tracker_main.py
 ```
+
+Или просто двойным кликом: `scripts\start_tracker.bat` (сам снимет бэкап БД,
+активирует venv и проверит, что `.env` на месте).
 
 В TG должно прийти сообщение "Трекер запущен (Data API)". Если не пришло — проверь токен и chat_id (ошибки будут в консоли).
 
@@ -97,28 +115,56 @@ python tracker_main.py
 ## Архитектура
 
 ```
-polymarket_tracker/
-├── tracker_main.py           ← entry point (asyncio main loop)
+Polymarket_tracker/                 ← корень проекта (запускать всё отсюда)
+├── tracker_main.py                 ← entry point (asyncio main loop)
 ├── requirements.txt
-├── .env                      ← твой конфиг (не коммитить!)
-├── .env.example
+├── .env                            ← твой конфиг (в git НЕ попадает)
+├── .env.example                    ← шаблон конфига
 ├── .gitignore
-├── whitelist.txt             ← адреса доверенных трейдеров, hot-reload
-├── tracker.db                ← SQLite с историей (создаётся автоматически)
-├── README.md
-├── TODO.md                   ← следующие шаги, миграция на новый ПК
+├── README.md                       ← этот файл: что это и как запустить
 │
-└── polymarket_tracker/
-    ├── __init__.py
-    ├── config.py             ← загрузка .env + константы Polymarket
-    ├── storage.py            ← SQLite (wallets, trades, signals)
-    ├── data_api_listener.py  ← НОВОЕ: polling Data API, замена onchain.py
-    ├── market_context.py     ← Gamma API wrapper с кэшем
-    ├── wallet_analyzer.py    ← классификация кошельков
-    ├── watchlist.py          ← hot-reload whitelist.txt
-    ├── anomaly_detector.py   ← две ветки детекции
-    ├── telegram_notifier.py  ← отправка сигналов
-    └── core.py               ← оркестратор
+├── polymarket_tracker/             ← ПАКЕТ: вся боевая логика
+│   ├── __init__.py
+│   ├── config.py                   ← загрузка .env + константы Polymarket
+│   ├── storage.py                  ← SQLite (wallets, trades, signals,
+│   │                                  signal_outcomes, shadow_trades)
+│   ├── data_api_listener.py        ← polling Data API (замена onchain.py)
+│   ├── market_context.py           ← Gamma API wrapper с кэшем
+│   ├── wallet_analyzer.py          ← классификация кошельков
+│   ├── watchlist.py                ← hot-reload whitelist
+│   ├── anomaly_detector.py         ← две ветки детекции
+│   ├── outcome_tracker.py          ← фоновый резолв исходов сигналов
+│   ├── telegram_notifier.py        ← отправка сигналов
+│   ├── telegram_commands.py        ← бот отвечает на /today, /stats, ...
+│   └── core.py                     ← оркестратор
+│
+├── tools/                          ← CLI-утилиты (запускать из корня)
+│   ├── stats.py                    ← аналитика сигналов и winrate
+│   ├── shadow_report.py            ← отчёт по теневой выборке
+│   ├── db_maintenance.py           ← бэкап / retention / VACUUM
+│   └── analyze_whitelist.py        ← скоринг кандидатов в whitelist
+│
+├── scripts/                        ← .bat для Windows, пути относительные
+│   ├── start_tracker.bat           ← бэкап БД + запуск трекера
+│   ├── backup_db.bat               ← только бэкап
+│   ├── git_push.bat                ← add + commit + push
+│   └── git_init.bat                ← разовая инициализация репозитория
+│
+├── data/                           ← ВСЕ данные проекта
+│   ├── whitelist.txt               ← боевой список, hot-reload
+│   ├── whitelist_filtered.txt      ← результат analyze_whitelist.py
+│   ├── whitelist_analysis.json     ← полный разбор кандидатов
+│   ├── tracker.db                  ← SQLite (создаётся автоматически)
+│   └── backups/                    ← ротация бэкапов БД
+│
+├── docs/
+│   ├── STATE.md                    ← ГДЕ ОСТАНОВИЛИСЬ (читать первым)
+│   ├── ROADMAP.md                  ← что сделано и что дальше
+│   └── SETUP.md                    ← установка с нуля на новом ПК
+│
+└── archive/                        ← сюда сваливаем всё отжившее
+    ├── debug/                      ← одноразовые скрипты разведки API
+    └── polymarket_tracker-main.zip ← исходный архив до реструктуризации
 ```
 
 ### Поток данных
@@ -161,11 +207,12 @@ TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 
 # ── Data API ──
-DATA_API_POLL_INTERVAL=3.0                # сек между запросами; меньше 1.0 не имеет смысла
+DATA_API_POLL_INTERVAL=3.0                # сек между запросами; меньше 1.0 запрещено
 DATA_API_BATCH_LIMIT=200                  # сделок за один запрос (max 10000)
 
-# ── Signal filters ──
+# ── Signal filters (Ветка A) ──
 MIN_TRADE_USDC=2000.0                     # стартовый порог; через 2-4 недели можно снизить до 500
+MAX_TRADE_PRICE=0.95                      # отсекаем "почти решённые" рынки: ROI < спреда
 MAX_MARKET_VOLUME_24H=50000.0             # отсекаем ликвидные рынки
 NEW_WALLET_MAX_TRADES=20
 NEW_WALLET_MAX_AGE_DAYS=30
@@ -175,12 +222,16 @@ CLUSTER_WINDOW_SECONDS=3600
 # ── Category filter ──
 IGNORED_CATEGORIES=crypto,sports
 
-# ── Whitelist ──
-WHITELIST_FILE=whitelist.txt
+# ── Whitelist (Ветка B) ──
+WHITELIST_FILE=data/whitelist.txt
 WHITELIST_MIN_USDC=200.0
 
+# ── Shadow tracker (измерение false negatives Ветки A) ──
+SHADOW_ENABLED=1
+SHADOW_MAX_VOLUME_24H=500000.0            # должен быть >= MAX_MARKET_VOLUME_24H
+
 # ── Storage ──
-DB_PATH=tracker.db
+DB_PATH=data/tracker.db
 LOG_LEVEL=INFO
 ```
 
@@ -211,7 +262,7 @@ MAX_MARKET_VOLUME_24H=150000
 
 ## Whitelist
 
-Файл `whitelist.txt`, по одному адресу в строке:
+Файл `data/whitelist.txt`, по одному адресу в строке:
 
 ```
 0x1234567890abcdef1234567890abcdef12345678  # комментарий после #
@@ -262,8 +313,8 @@ Outcome: Yes @ 0.075
 
 Проверь в консоли логи уровня INFO — должно быть `=== Tracker started ===` и периодически статистика. Если за 30 минут ноль — проверь БД:
 ```bash
-sqlite3 tracker.db "SELECT COUNT(*) FROM trades;"
-sqlite3 tracker.db "SELECT * FROM trades ORDER BY ts DESC LIMIT 5;"
+sqlite3 data/tracker.db "SELECT COUNT(*) FROM trades;"
+sqlite3 data/tracker.db "SELECT * FROM trades ORDER BY ts DESC LIMIT 5;"
 ```
 
 Если в trades есть записи, но в signals — пусто: фильтры жёсткие. Сними пороги:
@@ -290,6 +341,24 @@ curl https://data-api.polymarket.com/trades?limit=3
 
 ## Анализ сигналов
 
+Готовые отчёты (запускать из корня проекта, трекер останавливать не нужно —
+всё read-only):
+
+```cmd
+python tools\stats.py                 :: общая сводка: winrate, ROI, breakeven
+python tools\stats.py --addresses     :: разбивка по whitelist-адресам
+python tools\stats.py --by-day        :: динамика по дням
+python tools\stats.py --by-size       :: по корзинам размера сделки
+python tools\stats.py --open          :: сейчас открытые позиции
+python tools\stats.py --recent 20     :: последние 20 сигналов с исходом
+python tools\shadow_report.py         :: false negatives фильтров Ветки A
+```
+
+То же самое, но прямо в Telegram: `/today`, `/yesterday`, `/open`, `/stats`,
+`/signal <id>` — бот отвечает сам (`telegram_commands.py`).
+
+Сырой SQL, если нужно что-то своё:
+
 ```sql
 -- Сколько сигналов каждого типа
 SELECT signal_type, COUNT(*) FROM signals GROUP BY signal_type;
@@ -309,22 +378,21 @@ WHERE trade_count > 50 ORDER BY total_volume_usdc DESC LIMIT 20;
 
 ## Roadmap
 
-### v0.2 (сейчас) ✅
-- Polymarket Data API вместо ончейн-листенера
-- Совместимость с CTFv2 (28.04.2026 миграция)
-- Telegram notifications с pseudonym трейдера
-- SQLite storage + checkpoint
+Полная версия — в [docs/ROADMAP.md](docs/ROADMAP.md), текущее состояние —
+в [docs/STATE.md](docs/STATE.md). Кратко:
 
-### v0.3 — следующие шаги
-- Polymarket `/activity` API для точного возраста кошелька (не ждать накопления локальной БД)
-- Feedback через реакции Telegram (👍/👎 → user_feedback в БД)
-- Dashboard winrate по типам сигналов
-- Backtest на исторических данных
+### Сделано ✅
+- v0.2: Data API вместо ончейн-листенера, совместимость с CTFv2 (28.04.2026)
+- Telegram notifications + бот с командами `/today`, `/stats`, `/open`, `/signal`
+- SQLite storage + checkpoint + бэкапы и retention (`tools/db_maintenance.py`)
+- Outcome tracker: резолв исходов сигналов, winrate/ROI (`tools/stats.py`)
+- Shadow tracker: измерение false negatives фильтров (`tools/shadow_report.py`)
 
-### v0.4 — интеграция с торговым ботом
-- Cross-process сигнал в `polymarket_bot/` через Redis/SQLite
-- Ограниченное автоисполнение Ветки B
-- Reuse Kelly Criterion для размера позиции
+### Дальше
+- Накопить ≥100 resolved сигналов и решить по цифрам, какие фильтры оставить
+- Polymarket `/activity` API для точного возраста кошелька
+- Feedback через реакции Telegram (👍/👎 → `user_feedback` в БД)
+- v0.4: интеграция с торговым ботом, ограниченное автоисполнение Ветки B
 
 ---
 

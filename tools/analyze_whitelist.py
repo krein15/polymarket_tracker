@@ -8,18 +8,26 @@ analyze_whitelist.py v3 — winrate через /activity (REDEEM vs BUY).
     - winrate = кол-во выигранных conditionId / все завершённые conditionId
 
 Запуск:
-    python analyze_whitelist.py
+    python tools/analyze_whitelist.py
 
-Результат:
-    - whitelist_analysis.json
-    - whitelist_filtered.txt
+Результат (в data/):
+    - data/whitelist_analysis.json
+    - data/whitelist_filtered.txt
 """
 from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 from typing import Optional
+
 import requests
+
+# Результаты кладём в data/ рядом с боевым whitelist.txt.
+ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = ROOT / "data"
+OUT_JSON = DATA_DIR / "whitelist_analysis.json"
+OUT_TXT = DATA_DIR / "whitelist_filtered.txt"
 
 # ── Настройки ────────────────────────────────────────────────────
 MIN_WINRATE   = 0.80   # минимальный winrate
@@ -224,9 +232,9 @@ def main():
 
     results.sort(key=lambda x: x["winrate"] or 0, reverse=True)
 
-    with open("whitelist_analysis.json", "w", encoding="utf-8") as f:
+    with open(OUT_JSON, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    print("Полная статистика → whitelist_analysis.json")
+    print(f"Полная статистика → {OUT_JSON}")
 
     passed  = [r for r in results if r["pass"]]
     failed  = [r for r in results if r["winrate"] is not None and not r["pass"]]
@@ -256,7 +264,7 @@ def main():
     for r in errors:
         print(f"  ERROR: {r['nickname']} — {r['error']}")
 
-    with open("whitelist_filtered.txt", "w", encoding="utf-8") as f:
+    with open(OUT_TXT, "w", encoding="utf-8") as f:
         f.write("# Whitelist Polymarket трейдеров\n")
         f.write(f"# Фильтр: winrate >= {MIN_WINRATE*100:.0f}%, min {MIN_RESOLVED} завершённых рынков\n")
         f.write(f"# Сгенерировано: {time.strftime('%Y-%m-%d %H:%M')}\n")
@@ -265,8 +273,8 @@ def main():
             wr = f"{r['winrate']*100:.1f}%"
             f.write(f"{r['address']}  # {r['nickname']} (winrate {wr}, {r['won']}W/{r['lost']}L)\n")
 
-    print(f"\nГотовый whitelist → whitelist_filtered.txt ({len(passed)} адресов)")
-    print("Скинь мне whitelist_analysis.json!")
+    print(f"\nГотовый whitelist → {OUT_TXT} ({len(passed)} адресов)")
+    print(f"Полный разбор по каждому адресу — в {OUT_JSON}")
 
 
 if __name__ == "__main__":

@@ -1,18 +1,19 @@
 # ── СЕКРЕТЫ — никогда не коммитим! ──
 .env
-*.env
+.env.*
 !.env.example
 
-# ── Локальная БД — у каждого своя ──
+# ── Локальная БД и бэкапы — у каждого свои ──
 *.db
 *.db-journal
 *.db-shm
 *.db-wal
-tracker.db*
+data/tracker.db*
+data/backups/
 
-# ── Whitelist (опционально) ──
-# Если хочешь шарить whitelist — закомментируй следующую строку
-# whitelist.txt
+# ── Whitelist коммитим (это часть конфигурации стратегии).
+#    Если захочешь скрыть — раскомментируй:
+# data/whitelist.txt
 
 # ── Python ──
 __pycache__/
@@ -42,3 +43,6 @@ Thumbs.db
 # ── Логи ──
 *.log
 logs/
+
+# ── Архив (исходный zip лежит локально, в репо не нужен) ──
+archive/*.zip

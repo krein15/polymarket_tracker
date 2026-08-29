@@ -1,16 +1,16 @@
 """Stats CLI — анализ накопленных сигналов и их исходов.
 
 Запускать из корня проекта:
-    python stats.py                     # общая сводка
-    python stats.py --addresses         # разбивка по whitelist-адресам
-    python stats.py --by-day            # динамика по дням
-    python stats.py --by-size           # по корзинам размера
-    python stats.py --recent 20         # последние N сигналов с исходом
-    python stats.py --open              # сейчас открытые позиции
-    python stats.py --signal 65         # детально по одному сигналу
+    python tools/stats.py                  # общая сводка
+    python tools/stats.py --addresses      # разбивка по whitelist-адресам
+    python tools/stats.py --by-day         # динамика по дням
+    python tools/stats.py --by-size        # по корзинам размера
+    python tools/stats.py --recent 20      # последние N сигналов с исходом
+    python tools/stats.py --open           # сейчас открытые позиции
+    python tools/stats.py --signal 65      # детально по одному сигналу
 
 Подробности:
-  --db PATH                     путь к tracker.db (default: tracker.db)
+  --db PATH                     путь к БД (default: data/tracker.db)
   --signal-type TYPE            фильтр: cluster|suspicious_entry|whitelist
 """
 from __future__ import annotations
@@ -20,7 +20,13 @@ import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
+
+# Пути по умолчанию считаем от КОРНЯ проекта (скрипт лежит в tools/),
+# поэтому запускать можно из любой папки.
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DB = str(ROOT / "data" / "tracker.db")
 
 
 # ───────── Metrics (TODO 2.1) ─────────
@@ -465,7 +471,7 @@ def cmd_signal(c: sqlite3.Connection, args) -> None:
 
 def main():
     p = argparse.ArgumentParser(description="Stats CLI для Polymarket трекера")
-    p.add_argument("--db", default="tracker.db", help="Путь к tracker.db (default: tracker.db)")
+    p.add_argument("--db", default=DEFAULT_DB, help="Путь к tracker.db (default: data/tracker.db)")
     p.add_argument("--signal-type", choices=["cluster", "suspicious_entry", "whitelist"],
                    help="Фильтр по типу сигнала")
 

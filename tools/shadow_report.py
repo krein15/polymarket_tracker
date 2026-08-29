@@ -13,8 +13,8 @@ outcome_tracker одинаково подтягивает резолв.
 Запуск из корня проекта (зависит только от stdlib, read-only — можно гонять
 параллельно с работающим трекером):
 
-    python shadow_report.py
-    python shadow_report.py --db путь --by-zone --by-category
+    python tools/shadow_report.py
+    python tools/shadow_report.py --db путь --by-zone --by-category
 
 Whitelist (Ветка B) в passed_filters НЕ учитывается — отчёт про Ветку A.
 """
@@ -24,6 +24,11 @@ import argparse
 import sqlite3
 import sys
 from pathlib import Path
+
+# Пути по умолчанию считаем от КОРНЯ проекта (скрипт лежит в tools/),
+# поэтому запускать можно из любой папки.
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DB = str(ROOT / "data" / "tracker.db")
 
 # Минимум resolved в группе, ниже которого выводы делать рано
 # (сквозной принцип TODO — размер выборки решает всё).
@@ -125,8 +130,8 @@ def verdict(passed: dict, rejected: dict) -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Shadow tracker report (TODO 0.3).")
-    parser.add_argument("--db", default="tracker.db",
-                        help="путь к БД (default: tracker.db)")
+    parser.add_argument("--db", default=DEFAULT_DB,
+                        help="путь к БД (default: data/tracker.db)")
     parser.add_argument("--by-zone", action="store_true",
                         help="разбивка отброшенных сделок по зонам цены входа")
     parser.add_argument("--by-category", action="store_true",

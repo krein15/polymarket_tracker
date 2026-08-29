@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """CLI обслуживания БД трекера: онлайн-бэкап + retention старых trades.
 
-Реализует пункт 0.2 из TODO. Запускать из КОРНЯ проекта — там же, где
-лежат tracker_main.py и stats.py (рядом с папкой polymarket_tracker/).
+Реализует пункт 0.2 роадмапа (docs/ROADMAP.md). Пути по умолчанию берутся
+от корня проекта, поэтому запускать можно из любой папки.
 
 Команды:
-    python db_maintenance.py backup     — снять бэкап + ротация старых
-    python db_maintenance.py prune      — удалить старые trades + VACUUM
-    python db_maintenance.py all        — backup, затем prune
+    python tools/db_maintenance.py backup   — снять бэкап + ротация старых
+    python tools/db_maintenance.py prune    — удалить старые trades + VACUUM
+    python tools/db_maintenance.py all      — backup, затем prune
 
 Опции:
-    --db PATH           путь к БД (default: tracker.db)
-    --backup-dir PATH   куда складывать бэкапы (default: backups)
+    --db PATH           путь к БД (default: data/tracker.db)
+    --backup-dir PATH   куда складывать бэкапы (default: data/backups)
     --keep N            сколько бэкапов хранить (default: 14)
     --days N            возраст trades для удаления, дней (default: 7)
     --yes               не спрашивать подтверждение для prune (для планировщика)
@@ -39,8 +39,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-DEFAULT_DB = "tracker.db"
-DEFAULT_BACKUP_DIR = "backups"
+# Пути по умолчанию — от КОРНЯ проекта (скрипт лежит в tools/).
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DB = str(ROOT / "data" / "tracker.db")
+DEFAULT_BACKUP_DIR = str(ROOT / "data" / "backups")
 DEFAULT_KEEP = 14
 DEFAULT_RETENTION_DAYS = 7
 

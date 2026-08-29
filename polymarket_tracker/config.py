@@ -72,7 +72,7 @@ class Config:
     ignored_categories: Set[str] = field(default_factory=lambda: {"crypto", "sports"})
 
     # Whitelist
-    whitelist_file: str = "whitelist.txt"
+    whitelist_file: str = "data/whitelist.txt"
     whitelist_min_usdc: float = 200.0
 
     # Shadow tracker (TODO 0.3): измерение false negatives фильтров Ветки A.
@@ -84,7 +84,7 @@ class Config:
     shadow_max_volume_24h: float = 500_000.0
 
     # Storage
-    db_path: str = "tracker.db"
+    db_path: str = "data/tracker.db"
 
     # Logging
     log_level: str = "INFO"
@@ -134,11 +134,11 @@ class Config:
             cluster_min_wallets=_int("CLUSTER_MIN_WALLETS", 2),
             cluster_window_seconds=_int("CLUSTER_WINDOW_SECONDS", 3600),
             ignored_categories=ignored_set,
-            whitelist_file=_str("WHITELIST_FILE", "whitelist.txt"),
+            whitelist_file=_str("WHITELIST_FILE", "data/whitelist.txt"),
             whitelist_min_usdc=_float("WHITELIST_MIN_USDC", 200.0),
             shadow_enabled=_bool("SHADOW_ENABLED", True),
             shadow_max_volume_24h=_float("SHADOW_MAX_VOLUME_24H", 500_000.0),
-            db_path=_str("DB_PATH", "tracker.db"),
+            db_path=_str("DB_PATH", "data/tracker.db"),
             log_level=_str("LOG_LEVEL", "INFO"),
             # Legacy (просто чтобы старые .env не ломались)
             polygon_rpc_url=_str("POLYGON_RPC_URL", ""),

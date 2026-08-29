@@ -2,7 +2,7 @@
 
 ВНИМАНИЕ: с переходом на Data API схема trades изменилась.
 PRIMARY KEY теперь (tx_hash, maker, token_id) вместо (tx_hash, log_index).
-Старые БД от V1-листенера несовместимы — удалите tracker.db перед первым
+Старые БД от V1-листенера несовместимы — удалите data/tracker.db перед первым
 запуском новой версии.
 """
 from __future__ import annotations
