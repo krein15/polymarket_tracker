@@ -228,6 +228,7 @@ class PolymarketTracker:
                 condition_id=trade.condition_id or "",
                 question=trade.title,
                 slug=trade.slug,
+                event_slug=trade.event_slug or "",
                 category="",  # без Gamma не знаем
                 volume_24h=0.0,
                 volume_total=0.0,

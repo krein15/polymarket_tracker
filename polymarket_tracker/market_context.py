@@ -24,7 +24,7 @@ class MarketInfo:
 
     condition_id: str
     question: str
-    slug: str
+    slug: str  # слаг РЫНКА — для ссылки не годится, см. event_slug
     category: str  # lowercase
     volume_24h: float
     volume_total: float
@@ -35,12 +35,17 @@ class MarketInfo:
     # Слаги тегов Gamma (esports, sports, politics, crypto, ...). Именно по ним
     # работает фильтр категорий: поле category у Gamma больше не заполняется.
     tags: frozenset = frozenset()
+    # Слаг СОБЫТИЯ. Ссылка на Polymarket строится только по нему: у рынка
+    # внутри события слаг свой ("...-total-5pt5"), и /event/<market_slug>
+    # отдаёт 404. Пустой — если Gamma не вернула событие.
+    event_slug: str = ""
     # Поля для outcome-трекера (фаза 1.2)
     last_trade_price: Optional[float] = None  # текущая цена нашего token_id
     settled_price: Optional[float] = None  # финальная цена нашего token_id (если closed)
 
     def url(self) -> str:
-        return f"https://polymarket.com/event/{self.slug}"
+        """Ссылка на страницу события. Слаг рынка сюда подставлять нельзя."""
+        return f"https://polymarket.com/event/{self.event_slug or self.slug}"
 
 
 # Крупные категории в порядке приоритета: рынок обычно несёт несколько тегов
@@ -217,11 +222,13 @@ class MarketContext:
                 for tag in (m.get("tags") or [])
                 if isinstance(tag, dict) and tag.get("slug")
             )
+            events = m.get("events", [])
+            event_slug = ""
+            if events and isinstance(events, list) and isinstance(events[0], dict):
+                event_slug = str(events[0].get("slug", "") or "")
             category = m.get("category", "") or ""
-            if not category:
-                events = m.get("events", [])
-                if events and isinstance(events, list):
-                    category = events[0].get("category", "") or ""
+            if not category and events and isinstance(events, list):
+                category = events[0].get("category", "") or ""
             category = category.lower().strip()
             if not category and tag_slugs:
                 category = _category_from_tags(tag_slugs)
@@ -267,6 +274,7 @@ class MarketContext:
                 slug=m.get("slug", ""),
                 category=category,
                 tags=tag_slugs,
+                event_slug=event_slug,
                 volume_24h=float(m.get("volume24hr", 0) or 0),
                 volume_total=float(m.get("volume", 0) or 0),
                 liquidity=float(m.get("liquidity", 0) or 0),

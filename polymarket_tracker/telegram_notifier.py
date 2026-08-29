@@ -124,7 +124,7 @@ class TelegramNotifier:
         elif pseudonym and pseudonym.strip():
             nickname_str = f" ({html.escape(pseudonym)})"
 
-        market_url = s.market.url() if s.market.slug else "https://polymarket.com"
+        market_url = s.market.url() if (s.market.event_slug or s.market.slug) else "https://polymarket.com"
         polygonscan_tx = f"https://polygonscan.com/tx/{s.trade.tx_hash}"
         polygonscan_addr = f"https://polygonscan.com/address/{s.trade.maker}"
 

@@ -70,6 +70,10 @@ class Config:
 
     # Category filter
     ignored_categories: Set[str] = field(default_factory=lambda: {"crypto", "sports"})
+    # Явное разрешение, перевешивает ignored_categories. Нужно, потому что
+    # киберспортивные рынки Polymarket несут теги {esports, sports, ...}
+    # одновременно: без исключения их режет фильтр "sports".
+    allowed_tags: Set[str] = field(default_factory=set)
 
     # Whitelist
     whitelist_file: str = "data/whitelist.txt"
@@ -120,6 +124,8 @@ class Config:
 
         ignored = _str("IGNORED_CATEGORIES", "crypto,sports").lower()
         ignored_set = {c.strip() for c in ignored.split(",") if c.strip()}
+        allowed = _str("ALLOWED_TAGS", "").lower()
+        allowed_set = {c.strip() for c in allowed.split(",") if c.strip()}
 
         cfg = cls(
             telegram_bot_token=_str("TELEGRAM_BOT_TOKEN", ""),
@@ -134,6 +140,7 @@ class Config:
             cluster_min_wallets=_int("CLUSTER_MIN_WALLETS", 2),
             cluster_window_seconds=_int("CLUSTER_WINDOW_SECONDS", 3600),
             ignored_categories=ignored_set,
+            allowed_tags=allowed_set,
             whitelist_file=_str("WHITELIST_FILE", "data/whitelist.txt"),
             whitelist_min_usdc=_float("WHITELIST_MIN_USDC", 200.0),
             shadow_enabled=_bool("SHADOW_ENABLED", True),

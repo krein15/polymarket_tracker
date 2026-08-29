@@ -58,7 +58,8 @@ class Trade:
 
     # Бонусные поля от Data API (не было у onchain Trade — обогащаем сигналы)
     title: Optional[str] = None  # название рынка
-    slug: Optional[str] = None  # slug для URL
+    slug: Optional[str] = None  # слаг РЫНКА (для ссылки не годится)
+    event_slug: Optional[str] = None  # слаг СОБЫТИЯ — из него строится ссылка
     outcome: Optional[str] = None  # "Yes" / "No" / название outcome
     condition_id: Optional[str] = None
     pseudonym: Optional[str] = None  # никнейм трейдера на Polymarket
@@ -273,6 +274,7 @@ class DataApiListener:
                 price=price,
                 title=item.get("title"),
                 slug=item.get("slug"),
+                event_slug=item.get("eventSlug"),
                 outcome=item.get("outcome"),
                 condition_id=item.get("conditionId"),
                 pseudonym=item.get("pseudonym"),
