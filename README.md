@@ -139,6 +139,7 @@ Polymarket_tracker/                 ← корень проекта (запус�
 │   └── core.py                     ← оркестратор
 │
 ├── tools/                          ← CLI-утилиты (запускать из корня)
+│   ├── setup_telegram.py           ← проверка токена + автопоиск chat_id
 │   ├── stats.py                    ← аналитика сигналов и winrate
 │   ├── shadow_report.py            ← отчёт по теневой выборке
 │   ├── db_maintenance.py           ← бэкап / retention / VACUUM

@@ -128,6 +128,8 @@ python -c "import aiohttp, dotenv, cachetools; print('OK')"
 Токен потерян: Telegram → @BotFather → `/mybots` → бот → API Token (там же
 можно перевыпустить). Или `/newbot` — новый бот с нуля.
 
+`chat_id` руками искать не нужно — см. шаг 4.
+
 ### Шаг 4. .env
 
 ```cmd
@@ -135,8 +137,25 @@ copy .env.example .env
 notepad .env
 ```
 
-Обязательны только два поля: `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID`.
-Остальное уже выставлено консервативно. Проверка:
+Вписать нужно **только `TELEGRAM_BOT_TOKEN`**. Остальное уже выставлено
+консервативно, а `chat_id` определится сам:
+
+```cmd
+python tools\setup_telegram.py
+```
+
+Скрипт проверит токен, найдёт chat_id по истории сообщений бота и запишет
+его в `.env`. Токен при этом нигде не печатается. Если список чатов пуст —
+напиши боту в Telegram любое сообщение и запусти скрипт снова: без этого
+Telegram не разрешает боту писать тебе первым.
+
+Проверить, что связь есть:
+
+```cmd
+python tools\setup_telegram.py --test
+```
+
+Полная проверка конфига:
 
 ```cmd
 python -c "from polymarket_tracker.config import Config; c=Config.from_env('.env'); e=c.validate(); print('OK' if not e else e); print('token_len', len(c.telegram_bot_token))"
@@ -147,10 +166,15 @@ python -c "from polymarket_tracker.config import Config; c=Config.from_env('.env
 ### Шаг 5. Проверить, что Data API жив
 
 ```cmd
-python -c "import urllib.request, json; d=json.loads(urllib.request.urlopen('https://data-api.polymarket.com/trades?limit=3', timeout=10).read()); print('got', len(d), 'trades')"
+curl "https://data-api.polymarket.com/trades?limit=3"
 ```
 
-Должно вывести `got 3 trades`.
+Должен прийти JSON с тремя сделками.
+
+⚠️ Не проверяй через `urllib` без заголовков — Data API отдаёт **403** на
+дефолтный `User-Agent` питона (`Python-urllib/3.x`), и выглядит это как
+«API лежит». Сам трекер ходит через `aiohttp` и отвечает `200`, так что
+на его работу это не влияет.
 
 ### Шаг 6. Восстановить БД (если есть)
 
