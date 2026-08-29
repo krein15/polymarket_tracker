@@ -91,7 +91,8 @@ class DataApiListener:
     def _make_session(self) -> aiohttp.ClientSession:
         """Создать новую aiohttp сессию."""
         return aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=15),
+            # Выборка на 10000 сделок весит ~8 МБ — 15 с на неё не хватает.
+            timeout=aiohttp.ClientTimeout(total=60),
             headers={"Accept": "application/json"},
         )
 
@@ -112,6 +113,15 @@ class DataApiListener:
 
         while True:
             try:
+                # Data API публикует сделки пачками раз в ~5 минут: "голова"
+                # стоит на месте, потом прыгает на +300 сек. Качать мегабайты
+                # каждые несколько секунд бессмысленно — сначала дешёвый запрос
+                # на одну сделку, и только если голова сдвинулась, тянем пачку.
+                head_ts = await self._fetch_head_ts()
+                if head_ts is not None and head_ts <= self._last_ts:
+                    await asyncio.sleep(cfg.data_api_poll_interval)
+                    continue
+
                 trades = await self._fetch_recent_trades(cfg.data_api_batch_limit)
 
                 # API отдаёт DESC по timestamp; разворачиваем для хронологии.
@@ -131,6 +141,16 @@ class DataApiListener:
                     # Грубо: при превышении сбрасываем — checkpoint всё равно
                     # защищает от повторов из прошлого окна.
                     self._seen.clear()
+
+                # Если вся выборка оказалась новой — значит окно упёрлось в
+                # потолок и часть сделок между чекпоинтом и самой старой
+                # записью пачки мы не увидели. Молча терять их нельзя.
+                if trades and len(fresh) >= len(trades) and self._last_ts > 0:
+                    log.warning(
+                        "Выборка забита под потолок (%d из %d новых): между чекпоинтом "
+                        "и пачкой возможны пропуски — увеличь DATA_API_BATCH_LIMIT",
+                        len(fresh), cfg.data_api_batch_limit,
+                    )
 
                 for t in fresh:
                     self._last_ts = max(self._last_ts, t.timestamp)
@@ -160,6 +180,29 @@ class DataApiListener:
                 self._session = None
                 await asyncio.sleep(backoff)
                 self._session = self._make_session()
+
+    async def _fetch_head_ts(self) -> Optional[int]:
+        """Timestamp самой свежей сделки у API — один запрос на одну запись.
+
+        Нужен, чтобы не тянуть многомегабайтную выборку, пока API не
+        опубликовал новую пачку. None — если ответ невалидный: тогда
+        вызывающий код идёт за полной выборкой, как раньше.
+        """
+        if self._session is None:
+            self._session = self._make_session()
+        try:
+            async with self._session.get(DATA_API_TRADES_URL, params={"limit": "1"}) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+        except Exception:
+            return None  # ошибку разберёт основная выборка ниже
+        if not isinstance(data, list) or not data:
+            return None
+        try:
+            return int(data[0].get("timestamp") or 0) or None
+        except (TypeError, ValueError):
+            return None
 
     async def _fetch_recent_trades(self, limit: int) -> list[Trade]:
         """Один GET к /trades. Возвращает массив Trade в порядке от API (DESC по ts)."""

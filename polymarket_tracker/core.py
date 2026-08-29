@@ -29,9 +29,58 @@ from .watchlist import Watchlist
 log = logging.getLogger(__name__)
 
 
+class _TokenRedactor(logging.Filter):
+    """Вырезает токен бота из логов.
+
+    aiohttp вкладывает полный URL запроса в текст своих исключений, а URL
+    Telegram Bot API содержит токен целиком. Без этого фильтра любой таймаут
+    к api.telegram.org печатает секрет в консоль и в файл лога — а логи
+    пересылают, когда просят помочь разобраться.
+
+    Фильтр вешается на обработчики root-логгера, поэтому накрывает и
+    сообщения, и аргументы, и текст трейсбеков.
+    """
+
+    MASK = "<TOKEN>"
+
+    def __init__(self, token: str):
+        super().__init__()
+        self.token = token or ""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not self.token:
+            return True
+        if isinstance(record.msg, str) and self.token in record.msg:
+            record.msg = record.msg.replace(self.token, self.MASK)
+        if record.args:
+            args = record.args if isinstance(record.args, tuple) else (record.args,)
+            masked = []
+            for a in args:
+                text = str(a)
+                masked.append(text.replace(self.token, self.MASK) if self.token in text else a)
+            record.args = tuple(masked) if isinstance(record.args, tuple) else masked[0]
+        if record.exc_info:
+            # Текст исключения формируется позже — подставляем очищенный заранее.
+            record.exc_text = logging.Formatter().formatException(
+                record.exc_info
+            ).replace(self.token, self.MASK)
+        return True
+
+
+def _install_token_redaction(token: str) -> None:
+    """Повесить редактор токена на все обработчики root-логгера (идемпотентно)."""
+    if not token:
+        return
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(f, _TokenRedactor) for f in handler.filters):
+            handler.addFilter(_TokenRedactor(token))
+
+
 class PolymarketTracker:
     def __init__(self, config: Config):
         self.config = config
+        # До создания любых сетевых клиентов: их ошибки не должны светить токен.
+        _install_token_redaction(config.telegram_bot_token)
         self.storage = Storage(config.db_path)
         self.watchlist = Watchlist(config.whitelist_file)
         self.listener = DataApiListener(config)
