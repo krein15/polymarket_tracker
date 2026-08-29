@@ -53,7 +53,9 @@ class MarketInfo:
 # отчётов нужен один осмысленный. Теги вроде earn-* — промо-метки Polymarket,
 # темы рынка они не описывают.
 _MAJOR_CATEGORIES = (
-    "sports", "crypto", "politics", "elections", "geopolitics", "world",
+    # esports строго раньше sports: киберспортивные рынки помечены обоими
+    # тегами, и без этого порядка они сливаются с обычным спортом в отчётах.
+    "esports", "sports", "crypto", "politics", "elections", "geopolitics", "world",
     "economy", "business", "tech", "science", "culture", "pop-culture",
 )
 

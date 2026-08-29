@@ -19,6 +19,9 @@ log = logging.getLogger(__name__)
 
 SIGNAL_ICONS = {
     "whitelist": "⭐",
+    "score": "🎯",
+    # Legacy-типы: сигналов с ними больше не приходит, оставлены чтобы
+    # старые записи в БД рендерились по-человечески.
     "suspicious_entry": "🔍",
     "cluster": "🚨",
 }
@@ -96,9 +99,12 @@ class TelegramNotifier:
         icon = SIGNAL_ICONS.get(s.signal_type, "📡")
         type_label = {
             "whitelist": "WHITELIST",
+            "score": "SCORE",
             "suspicious_entry": "SUSPICIOUS",
             "cluster": "CLUSTER",
         }.get(s.signal_type, s.signal_type.upper())
+        if s.score is not None:
+            type_label = f"{type_label} {s.score.total:.0f}"
 
         # Маркировка стороны: для whitelist особенно важно отличать вход от
         # выхода — "whale exit" и "whale entry" это разные сигналы.
@@ -142,6 +148,19 @@ class TelegramNotifier:
             f"<i>{html.escape(s.wallet.reason)}</i>",
             "",
             f"<b>Причина:</b> {reason}",
+        ]
+
+        # Разбивка балла: без неё число ни о чём не говорит, а по ней сразу
+        # видно, на чём именно сигнал держится.
+        if s.score is not None and s.score.notes:
+            lines.append("")
+            lines.append("<b>Из чего сложился балл:</b>")
+            for name, pts in sorted(s.score.parts.items(), key=lambda kv: -abs(kv[1])):
+                lines.append(f"  {pts:+.0f} · {html.escape(name)}")
+            for note in s.score.notes:
+                lines.append(f"<i>{html.escape(note)}</i>")
+
+        lines += [
             "",
             f'<a href="{market_url}">📊 Polymarket</a> | '
             f'<a href="{polygonscan_tx}">🔗 {tx_short}</a>',

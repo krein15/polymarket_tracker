@@ -152,11 +152,23 @@ class Storage:
             c.executescript(SCHEMA_SHADOW)
             # Идемпотентная миграция: добавить signals.side, если ещё нет.
             # Все старые сигналы — это buy (другая сторона ранее не реализовывалась).
-            try:
-                c.execute("ALTER TABLE signals ADD COLUMN side TEXT DEFAULT 'buy'")
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e).lower():
-                    raise
+            for ddl in (
+                "ALTER TABLE signals ADD COLUMN side TEXT DEFAULT 'buy'",
+                # Скоринг: балл и его разбивка по признакам. Разбивка нужна,
+                # чтобы потом измерить, какой признак несёт alpha, — ради этого
+                # скоринг и вводился.
+                "ALTER TABLE signals ADD COLUMN score REAL",
+                "ALTER TABLE signals ADD COLUMN score_parts TEXT",
+                # В теневой выборке балл считаем для ВСЕХ подходящих сделок,
+                # а не только для сигнальных: без этого не подобрать порог.
+                "ALTER TABLE shadow_trades ADD COLUMN score REAL",
+                "ALTER TABLE shadow_trades ADD COLUMN score_parts TEXT",
+            ):
+                try:
+                    c.execute(ddl)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        raise
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -264,6 +276,121 @@ class Storage:
             ).fetchall()
             return len(rows)
 
+    # ───────── Признаки для скоринга ─────────
+
+    def sum_wallet_buys_for_token(
+        self, maker: str, token_id: str, since_ts: int
+    ) -> tuple[float, int]:
+        """Сколько кошелёк набрал по токену за окно: (сумма USDC, число сделок).
+
+        Нужно для признака "накопление позиции": порог на одну сделку не видит
+        того, кто набирает ту же сумму двадцатью мелкими покупками.
+        """
+        with self._conn() as c:
+            row = c.execute(
+                """
+                SELECT COALESCE(SUM(usdc_amount), 0.0) AS total, COUNT(*) AS n
+                FROM trades
+                WHERE maker = ? AND token_id = ? AND ts >= ? AND side = 'buy'
+                """,
+                (maker.lower(), token_id, since_ts),
+            ).fetchone()
+            return float(row["total"] or 0.0), int(row["n"] or 0)
+
+    def wallet_prev_trade_ts(self, maker: str, before_ts: int) -> Optional[int]:
+        """Время предыдущей сделки кошелька строго до before_ts.
+
+        Нужно для признака "пробуждение": кошелёк молчал месяцами и вдруг
+        берёт крупно. Считаем по trades, а не по wallets.last_seen_ts, —
+        последний уже обновлён текущей сделкой к моменту оценки.
+        """
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT MAX(ts) AS prev FROM trades WHERE maker = ? AND ts < ?",
+                (maker.lower(), before_ts),
+            ).fetchone()
+            return int(row["prev"]) if row and row["prev"] is not None else None
+
+    def market_volume_since(self, token_id: str, since_ts: int) -> float:
+        """Оборот по токену с момента since_ts (USDC)."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COALESCE(SUM(usdc_amount), 0.0) AS v FROM trades "
+                "WHERE token_id = ? AND ts >= ?",
+                (token_id, since_ts),
+            ).fetchone()
+            return float(row["v"] or 0.0)
+
+    def market_hourly_baseline(
+        self, token_id: str, now_ts: int, window_hours: int, min_hours: int
+    ) -> Optional[float]:
+        """Средний часовой оборот рынка за окно — база для сравнения.
+
+        Смысл признака: важен не абсолютный размер сделки, а во сколько раз
+        она больше того, чем этот рынок живёт обычно. Рынок с оборотом
+        $300/день и рынок с $40000/день нельзя мерить одной константой.
+
+        None — если истории меньше min_hours (на свежей БД это норма, тогда
+        вызывающий код падает обратно на volume24h из Gamma).
+        """
+        since = now_ts - window_hours * 3600
+        with self._conn() as c:
+            row = c.execute(
+                """
+                SELECT COALESCE(SUM(usdc_amount), 0.0) AS total,
+                       MIN(ts) AS first_ts
+                FROM trades WHERE token_id = ? AND ts >= ?
+                """,
+                (token_id, since),
+            ).fetchone()
+        if not row or row["first_ts"] is None:
+            return None
+        covered_hours = max(1.0, (now_ts - int(row["first_ts"])) / 3600.0)
+        if covered_hours < min_hours:
+            return None
+        return float(row["total"] or 0.0) / covered_hours
+
+    def history_days(self, now_ts: int) -> float:
+        """Сколько дней локальной истории накоплено.
+
+        Нужно для холодного старта: пока история короче возраста "нового"
+        кошелька, признак новизны ничего не значит — в свежей БД новыми
+        выглядят почти все, кого мы просто ещё не видели.
+        """
+        with self._conn() as c:
+            row = c.execute("SELECT MIN(ts) AS first_ts FROM trades").fetchone()
+        if not row or row["first_ts"] is None:
+            return 0.0
+        return max(0.0, (now_ts - int(row["first_ts"])) / 86400.0)
+
+    def count_distinct_wallets_for_token(self, token_id: str, since_ts: int) -> int:
+        """Сколько РАЗНЫХ кошельков торговали токен после since_ts.
+
+        В отличие от count_recent_new_wallets_for_token не требует новизны:
+        синхронный заход нескольких старых адресов — тоже кластер.
+        """
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COUNT(DISTINCT maker) AS n FROM trades "
+                "WHERE token_id = ? AND ts >= ?",
+                (token_id, since_ts),
+            ).fetchone()
+            return int(row["n"] or 0)
+
+    def wallet_traded_both_sides(self, maker: str, token_id: str) -> bool:
+        """Торговал ли кошелёк обе стороны этого рынка.
+
+        Признак маркет-мейкера или арбитражника: на пустой БД такой адрес
+        выглядит "новым" и тянет ложные сигналы.
+        """
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COUNT(DISTINCT side) AS n FROM trades "
+                "WHERE maker = ? AND token_id = ?",
+                (maker.lower(), token_id),
+            ).fetchone()
+            return int(row["n"] or 0) > 1
+
     # ───────── Signals ─────────
 
     def save_signal(
@@ -278,17 +405,19 @@ class Storage:
         reason: str,
         tx_hash: Optional[str] = None,
         side: str = "buy",
+        score: Optional[float] = None,
+        score_parts: Optional[str] = None,
     ) -> int:
         with self._conn() as c:
             cur = c.execute(
                 """
                 INSERT INTO signals
                 (ts, signal_type, maker, token_id, market_slug,
-                 usdc_amount, price, reason, tx_hash, side)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 usdc_amount, price, reason, tx_hash, side, score, score_parts)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (ts, signal_type, maker.lower(), token_id, market_slug,
-                 usdc_amount, price, reason, tx_hash, side),
+                 usdc_amount, price, reason, tx_hash, side, score, score_parts),
             )
             return cur.lastrowid or 0
 
@@ -536,6 +665,8 @@ class Storage:
         passed_filters: bool,
         signal_types: Optional[str],
         now_ts: int,
+        score: Optional[float] = None,
+        score_parts: Optional[str] = None,
     ) -> bool:
         """Записать сделку в shadow_trades. Возвращает True если новая (не дубль).
 
@@ -550,13 +681,14 @@ class Storage:
                     INSERT INTO shadow_trades
                     (tx_hash, maker, token_id, ts, side, usdc_amount, price,
                      market_slug, category, volume_24h, passed_filters,
-                     signal_types, created_ts)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     signal_types, created_ts, score, score_parts)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         tx_hash, maker.lower(), token_id, ts, side, usdc_amount,
                         price, market_slug, category, volume_24h,
                         1 if passed_filters else 0, signal_types, now_ts,
+                        score, score_parts,
                     ),
                 )
                 return True

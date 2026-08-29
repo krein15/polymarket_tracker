@@ -21,6 +21,7 @@ Whitelist (Ветка B) в passed_filters НЕ учитывается — от�
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -33,6 +34,11 @@ DEFAULT_DB = str(ROOT / "data" / "tracker.db")
 # Минимум resolved в группе, ниже которого выводы делать рано
 # (сквозной принцип TODO — размер выборки решает всё).
 MIN_RESOLVED_FOR_VERDICT = 30
+
+# Корзины балла скоринга. Границы совпадают со ступенями весов в scoring.py,
+# чтобы по отчёту было видно, где проходит осмысленная граница сигнала.
+SCORE_BUCKETS = [(-100.0, 20.0), (20.0, 35.0), (35.0, 50.0),
+                 (50.0, 65.0), (65.0, 80.0), (80.0, 1e9)]
 
 # Зоны цены входа — те же границы, что в TODO.
 PRICE_ZONES = [
@@ -105,7 +111,7 @@ def fmt_stats(label: str, s: dict) -> str:
 def load_rows(conn: sqlite3.Connection) -> list:
     return conn.execute(
         "SELECT price, passed_filters, category, market_resolved, "
-        "trader_was_right, roi_if_followed FROM shadow_trades"
+        "trader_was_right, roi_if_followed, score, score_parts FROM shadow_trades"
     ).fetchall()
 
 
@@ -136,6 +142,10 @@ def main(argv=None) -> int:
                         help="разбивка отброшенных сделок по зонам цены входа")
     parser.add_argument("--by-category", action="store_true",
                         help="разбивка отброшенных сделок по категориям")
+    parser.add_argument("--by-score", action="store_true",
+                        help="разбивка по баллу скоринга — по ней калибруется SCORE_THRESHOLD")
+    parser.add_argument("--by-feature", action="store_true",
+                        help="winrate по наличию каждого признака: кто несёт alpha, кто шумит")
     args = parser.parse_args(argv)
 
     db_path = Path(args.db)
@@ -206,6 +216,43 @@ def main(argv=None) -> int:
             cats.setdefault(r["category"] or "(пусто)", []).append(r)
         for cat, crows in sorted(cats.items(), key=lambda kv: -len(kv[1])):
             print(fmt_stats(cat, bucket_stats(crows)))
+
+    if args.by_score:
+        print()
+        print("─── По баллу скоринга ───")
+        scored = [r for r in rows if r["score"] is not None]
+        if not scored:
+            print("  Балла ни у одной строки нет — скоринг ещё не работал"
+                  " (SCORING_ENABLED=0 или строки старше него).")
+        else:
+            print(f"  строк с баллом: {len(scored)} из {total}")
+            for lo, hi in SCORE_BUCKETS:
+                bucket = [r for r in scored if lo <= r["score"] < hi]
+                label = f"{lo:.0f}-{hi:.0f}" if hi < 1e9 else f"{lo:.0f}+"
+                print(fmt_stats(label, bucket_stats(bucket)))
+            print()
+            print("  Порог SCORE_THRESHOLD ставят там, где winrate по корзинам")
+            print("  перестаёт расти: выше него сигналы, ниже — шум. Пока в")
+            print("  корзине меньше 30 resolved, её цифра ни о чём не говорит.")
+
+    if args.by_feature:
+        print()
+        print("─── По признакам скоринга ───")
+        scored = [r for r in rows if r["score_parts"]]
+        if not scored:
+            print("  Разбивки по признакам ещё нет.")
+        else:
+            names = sorted({n for r in scored for n in json.loads(r["score_parts"])})
+            print(f"  строк с разбивкой: {len(scored)}")
+            for name in names:
+                with_f = [r for r in scored if name in json.loads(r["score_parts"])]
+                without = [r for r in scored if name not in json.loads(r["score_parts"])]
+                a, b = bucket_stats(with_f), bucket_stats(without)
+                print(fmt_stats(f"{name} есть", a))
+                print(fmt_stats(f"{name} нет ", b))
+            print()
+            print("  Признак полезен, если winrate 'есть' устойчиво выше 'нет'.")
+            print("  Иначе он только добавляет баллов шуму — вес пора менять.")
 
     print()
     print("Напоминание: ни один фильтр не пересматривается, пока подгруппа не")

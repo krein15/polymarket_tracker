@@ -207,12 +207,16 @@ class PolymarketTracker:
         # 3. Обновить чекпоинт
         self.storage.set_checkpoint("last_trade_ts", str(trade.timestamp))
 
-        # 4. Быстрый фильтр: если сделка мелкая И не whitelist — не тратим запрос к Gamma
+        # 4. Быстрый фильтр: если сделка мелкая И не whitelist — не тратим запрос к Gamma.
+        # Порог берём минимальный из двух: скоринг работает с сделками заметно
+        # мельче min_trade_usdc, чтобы видеть набор позиции частями.
         is_whitelisted = self.watchlist.is_whitelisted(trade.maker)
-        if (
-            not is_whitelisted
-            and trade.usdc_amount < self.config.min_trade_usdc
-        ):
+        min_interesting = (
+            min(self.config.min_trade_usdc, self.config.scoring_min_trade_usdc)
+            if self.config.scoring_enabled
+            else self.config.min_trade_usdc
+        )
+        if not is_whitelisted and trade.usdc_amount < min_interesting:
             return
 
         # 5. Получить метаданные рынка (Gamma API). Если Data API уже вернул
@@ -240,7 +244,8 @@ class PolymarketTracker:
             log.debug("Market metadata из Trade (Gamma промахнулся): %s", trade.slug)
 
         # 6. Прогнать через детектор
-        signals = self.detector.evaluate(trade, market, assessment)
+        result = self.detector.evaluate(trade, market, assessment)
+        signals = result.signals
 
         if signals:
             log.info("📡 %d сигнал(ов) на %s: %s", len(signals), trade, [s.signal_type for s in signals])
@@ -251,17 +256,23 @@ class PolymarketTracker:
         # 7. Shadow capture (TODO 0.3): фиксируем сделку для измерения
         #    false negatives — после отправки сигналов, чтобы запись в
         #    shadow не задерживала боевой сигнал.
-        self._record_shadow_trade(trade, market, signals)
+        self._record_shadow_trade(trade, market, result)
 
-    def _record_shadow_trade(self, trade: Trade, market, signals: list) -> None:
-        """Shadow capture (TODO 0.3): фиксируем ВСЕ покупки >= MIN_TRADE_USDC
-        на неликвидных рынках — прошли они фильтры Ветки A или нет — чтобы
-        потом измерить false negatives (см. shadow_report.py).
+    def _record_shadow_trade(self, trade: Trade, market, result) -> None:
+        """Shadow capture: фиксируем ВСЕ покупки >= MIN_TRADE_USDC на
+        неликвидных рынках — с баллом скоринга и с вердиктом прежней Ветки A.
 
-        passed_filters считаем только по Ветке A (suspicious_entry / cluster):
-        именно её фильтры (размер, категория, объём, новизна, цена) мы и
-        проверяем на ложные отсевы. Whitelist (Ветка B) — иной механизм,
-        в passed_filters не учитывается.
+        passed_filters — сработала бы прежняя цепочка И. Сигналов она больше
+        не шлёт, но её вердикт пишется рядом с баллом: только так можно на
+        одних и тех же сделках сравнить старую методику с новой.
+
+        score/score_parts пишем всегда, когда балл посчитан, — даже если он
+        ниже порога. Иначе порог не на чем калибровать: в выборке остались бы
+        только те сделки, что и так прошли.
+
+        Ограничение: выборка по-прежнему начинается с MIN_TRADE_USDC, поэтому
+        накопление позиции мелкими покупками в неё не попадает — резолвить
+        столько строк outcome_tracker не успеет.
 
         Любая ошибка здесь не должна ломать боевой путь — поэтому глушим.
         """
@@ -277,9 +288,9 @@ class PolymarketTracker:
         if market.volume_24h > cfg.shadow_max_volume_24h:
             return
 
-        branch_a = {"suspicious_entry", "cluster"}
-        passed = any(s.signal_type in branch_a for s in signals)
-        types = sorted({s.signal_type for s in signals})
+        passed = result.legacy_passed
+        types = sorted(set(result.legacy_types) | {s.signal_type for s in result.signals})
+        score = result.score
 
         try:
             self.storage.save_shadow_trade(
@@ -296,6 +307,8 @@ class PolymarketTracker:
                 passed_filters=passed,
                 signal_types=",".join(types) if types else None,
                 now_ts=int(time.time()),
+                score=score.total if score else None,
+                score_parts=score.parts_json() if score else None,
             )
         except Exception as e:
             log.warning("Shadow capture не удался для %s: %s", trade.tx_hash, e)
@@ -315,6 +328,8 @@ class PolymarketTracker:
             reason=signal.reason,
             tx_hash=signal.trade.tx_hash,
             side=signal.trade.side,
+            score=signal.score.total if signal.score else None,
+            score_parts=signal.score.parts_json() if signal.score else None,
         )
 
         # Заводим болванку для outcome-трекера (фаза 1.2)

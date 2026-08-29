@@ -1,30 +1,38 @@
-"""Детектор аномалий — главная логика.
+"""Детектор — решает, какая сделка достойна сигнала.
 
-Две независимые ветки детекции:
+Схема после перехода на скоринг (29.08.2026):
 
-Ветка A — "Suspicious entry":
-    Все фильтры должны совпасть одновременно:
-    - размер сделки ≥ min_trade_usdc (отсекаем мелочь)
-    - категория рынка НЕ в ignored_categories (crypto, sports)
-    - volume_24h рынка < max_market_volume (малоликвидный)
-    - maker считается "новым" (trade_count и age)
-    - ИЛИ есть кластер из N+ новых кошельков на этом рынке за последний час
-
-Ветка B — "Whitelist activity":
+Ветка B — "Whitelist" (без изменений):
     - maker ∈ whitelist
     - размер сделки ≥ whitelist_min_usdc
 
-Обе ветки работают параллельно — одна сделка может генерить оба сигнала.
+Ветка S — "Score" (заменила прежнюю Ветку A):
+    Жёсткие ворота (то, что бессмысленно взвешивать):
+        - только покупки
+        - рынок не закрыт
+        - категория/теги не в ignored_categories (с учётом allowed_tags)
+        - размер сделки ≥ scoring_min_trade_usdc — дешёвый предфильтр,
+          чтобы не гонять запросы к БД на каждую мелочь
+    Дальше признаки складываются в балл (см. scoring.py), сигнал уходит
+    при score ≥ score_threshold.
+
+Ветка A — прежняя цепочка И — ПРОДОЛЖАЕТ считаться, но сигналов больше не
+шлёт: её вердикт пишется в shadow_trades.passed_filters. Это даёт прямое
+сравнение старой и новой методики на одних и тех же сделках. Выкидывать её
+можно будет, когда накопится статистика и станет видно, кто кого.
+
+Ветки независимы: одна сделка может дать и whitelist-сигнал, и score-сигнал.
 """
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from .config import Config
 from .data_api_listener import Trade
 from .market_context import MarketInfo
+from .scoring import FeatureExtractor, Score, compute_score
 from .storage import Storage
 from .wallet_analyzer import WalletAssessment
 from .watchlist import Watchlist
@@ -36,12 +44,27 @@ log = logging.getLogger(__name__)
 class Signal:
     """Сигнал для отправки в Telegram."""
 
-    signal_type: str  # "suspicious_entry" | "whitelist" | "cluster"
+    signal_type: str  # "score" | "whitelist" | (legacy: "suspicious_entry" | "cluster")
     trade: Trade
     market: MarketInfo
     wallet: WalletAssessment
     reason: str  # что именно сработало
     cluster_size: int = 0  # для кластерного сигнала
+    score: Optional[Score] = None  # заполнен у сигналов Ветки S
+
+
+@dataclass
+class EvaluationResult:
+    """Итог разбора одной сделки.
+
+    Кроме сигналов несёт то, что нужно теневой выборке: балл (даже когда он
+    ниже порога — иначе порог не на чем калибровать) и вердикт старой Ветки A.
+    """
+
+    signals: list = field(default_factory=list)
+    score: Optional[Score] = None
+    legacy_passed: bool = False  # сработала бы прежняя цепочка И
+    legacy_types: list = field(default_factory=list)
 
 
 class AnomalyDetector:
@@ -49,21 +72,22 @@ class AnomalyDetector:
         self.config = config
         self.storage = storage
         self.watchlist = watchlist
+        self.features = FeatureExtractor(storage, config)
 
     def evaluate(
         self,
         trade: Trade,
         market: Optional[MarketInfo],
         wallet: WalletAssessment,
-    ) -> list[Signal]:
-        """Прогнать сделку через обе ветки. Может вернуть 0, 1 или 2 сигнала."""
-        signals: list[Signal] = []
+    ) -> EvaluationResult:
+        """Прогнать сделку через все ветки."""
+        result = EvaluationResult()
 
         # ── Ветка B: Whitelist ──
-        # Обрабатывается первой, т.к. не требует market metadata
+        # Первая, т.к. не требует ни метаданных рынка, ни запросов к БД.
         if self.watchlist.is_whitelisted(trade.maker):
             if trade.usdc_amount >= self.config.whitelist_min_usdc and market:
-                signals.append(
+                result.signals.append(
                     Signal(
                         signal_type="whitelist",
                         trade=trade,
@@ -73,79 +97,103 @@ class AnomalyDetector:
                     )
                 )
 
-        # ── Ветка A: Suspicious entry ──
-        # Требуем market metadata
         if market is None:
-            return signals
+            return result
 
-        if not self._passes_base_filters(trade, market):
-            return signals
+        # ── Ветка A (legacy): считаем вердикт, но не шлём ──
+        result.legacy_types = self._legacy_branch_a_types(trade, market, wallet)
+        result.legacy_passed = bool(result.legacy_types)
 
-        # Проверяем кластер (несколько новых кошельков)
-        cluster_size = self.storage.count_recent_new_wallets_for_token(
-            token_id=trade.token_id,
-            since_ts=trade.timestamp - self.config.cluster_window_seconds,
-            max_trades=self.config.new_wallet_max_trades,
-        )
+        # ── Ветка S: скоринг ──
+        if not self.config.scoring_enabled:
+            return result
+        if not self._passes_hard_gates(trade, market):
+            return result
 
-        if cluster_size >= self.config.cluster_min_wallets:
-            signals.append(
+        features = self.features.extract(trade, market, wallet)
+        score = compute_score(features, self.config)
+        result.score = score
+
+        if score.total >= self.config.score_threshold:
+            result.signals.append(
                 Signal(
-                    signal_type="cluster",
+                    signal_type="score",
                     trade=trade,
                     market=market,
                     wallet=wallet,
-                    reason=f"Кластер: {cluster_size} новых кошельков за час",
-                    cluster_size=cluster_size,
-                )
-            )
-        elif wallet.is_new:
-            # Одиночный новый кошелёк — тоже сигнал (но слабее)
-            signals.append(
-                Signal(
-                    signal_type="suspicious_entry",
-                    trade=trade,
-                    market=market,
-                    wallet=wallet,
-                    reason=(
-                        f"Новый кошелёк (trades={wallet.trade_count}, "
-                        f"age={wallet.first_seen_days_ago:.1f}д), "
-                        f"малоликвидный рынок (vol24h=${market.volume_24h:.0f})"
-                    ),
+                    reason=f"Балл {score.total:.0f}: {score.summary()}",
+                    cluster_size=features.cluster_new_wallets,
+                    score=score,
                 )
             )
 
-        return signals
+        return result
 
-    def _passes_base_filters(self, trade: Trade, market: MarketInfo) -> bool:
-        """Базовые фильтры Ветки A (кроме новизны кошелька)."""
+    # ───────── Ворота Ветки S ─────────
+
+    def _passes_hard_gates(self, trade: Trade, market: MarketInfo) -> bool:
+        """Условия, которые бессмысленно взвешивать — либо да, либо нет."""
         cfg = self.config
 
         if trade.side != "buy":
-            return False  # интересуют только покупки — открытие позиции
-
-        if trade.usdc_amount < cfg.min_trade_usdc:
-            return False
-
-        # Отсекаем "почти решённые" рынки: на price≥0.95 ROI~+0.5%
-        # (меньше спреда Polymarket), сигнал торгово-бесполезен.
-        if trade.price >= cfg.max_trade_price:
-            return False
+            return False  # интересует открытие позиции, не выход
 
         if market.closed:
             return False
 
-        # Сверяем и category, и теги: у Gamma рынок LoL приходит с тегами
-        # {esports, league-of-legends, games, sports} — по одному лишь
-        # category="esports" фильтр "sports" его не поймает.
+        # Дешёвый предфильтр: на каждую сделку признаки не считаем, это
+        # несколько запросов к SQLite. Порог заметно ниже сигнального —
+        # иначе не увидим тех, кто набирает позицию частями.
+        if trade.usdc_amount < cfg.scoring_min_trade_usdc:
+            return False
+
+        return not self._is_ignored_category(market)
+
+    def _is_ignored_category(self, market: MarketInfo) -> bool:
+        """Категория рынка в чёрном списке (с учётом явных разрешений).
+
+        Сверяем и category, и теги: рынок LoL приходит с тегами
+        {esports, league-of-legends, games, sports} — по одному лишь
+        category="esports" фильтр "sports" его не поймает.
+        """
+        cfg = self.config
         market_tags = {market.category} | set(market.tags)
         # ALLOWED_TAGS перевешивает: киберспорт помечен и как sports, вернуть
         # его иначе нельзя, не открыв заодно весь обычный спорт.
-        if not (cfg.allowed_tags & market_tags):
-            if cfg.ignored_categories & market_tags:
-                return False
-
-        if market.volume_24h > cfg.max_market_volume_24h:
+        if cfg.allowed_tags & market_tags:
             return False
+        return bool(cfg.ignored_categories & market_tags)
 
-        return True
+    # ───────── Ветка A: прежняя логика, только для сравнения ─────────
+
+    def _legacy_branch_a_types(
+        self, trade: Trade, market: MarketInfo, wallet: WalletAssessment
+    ) -> list:
+        """Что прислала бы прежняя цепочка И. Сигналы отсюда не отправляются —
+        вердикт нужен теневой выборке, чтобы сравнить старую методику с новой.
+        """
+        cfg = self.config
+
+        if trade.side != "buy":
+            return []
+        if trade.usdc_amount < cfg.min_trade_usdc:
+            return []
+        if trade.price >= cfg.max_trade_price:
+            return []
+        if market.closed:
+            return []
+        if self._is_ignored_category(market):
+            return []
+        if market.volume_24h > cfg.max_market_volume_24h:
+            return []
+
+        cluster_size = self.storage.count_recent_new_wallets_for_token(
+            token_id=trade.token_id,
+            since_ts=trade.timestamp - cfg.cluster_window_seconds,
+            max_trades=cfg.new_wallet_max_trades,
+        )
+        if cluster_size >= cfg.cluster_min_wallets:
+            return ["cluster"]
+        if wallet.is_new:
+            return ["suspicious_entry"]
+        return []

@@ -75,6 +75,20 @@ class Config:
     # одновременно: без исключения их режет фильтр "sports".
     allowed_tags: Set[str] = field(default_factory=set)
 
+    # Scoring (взвешенная оценка вместо жёсткой цепочки И, см. scoring.py).
+    # Пороговый балл — стартовая гипотеза: калибруется по shadow-выборке,
+    # когда наберётся статистика (tools/shadow_report.py --by-score).
+    scoring_enabled: bool = True
+    score_threshold: float = 50.0
+    # Дешёвый предфильтр входа в скоринг. Заметно ниже min_trade_usdc: иначе
+    # не увидим тех, кто набирает позицию частями. Замер на живых данных:
+    # при $200 это ~0.7 сделок/с и ~4 запроса/с к SQLite — приемлемо.
+    scoring_min_trade_usdc: float = 200.0
+    # Окно, в котором покупки одного кошелька по одному исходу считаются
+    # набором одной позиции. 30 минут — компромисс между дроблением ордера
+    # и склейкой независимых заходов.
+    accumulation_window_seconds: int = 1800
+
     # Whitelist
     whitelist_file: str = "data/whitelist.txt"
     whitelist_min_usdc: float = 200.0
@@ -141,6 +155,10 @@ class Config:
             cluster_window_seconds=_int("CLUSTER_WINDOW_SECONDS", 3600),
             ignored_categories=ignored_set,
             allowed_tags=allowed_set,
+            scoring_enabled=_bool("SCORING_ENABLED", True),
+            score_threshold=_float("SCORE_THRESHOLD", 50.0),
+            scoring_min_trade_usdc=_float("SCORING_MIN_TRADE_USDC", 200.0),
+            accumulation_window_seconds=_int("ACCUMULATION_WINDOW_SECONDS", 1800),
             whitelist_file=_str("WHITELIST_FILE", "data/whitelist.txt"),
             whitelist_min_usdc=_float("WHITELIST_MIN_USDC", 200.0),
             shadow_enabled=_bool("SHADOW_ENABLED", True),
@@ -168,4 +186,6 @@ class Config:
             errors.append("DATA_API_BATCH_LIMIT должен быть в диапазоне [1, 10000]")
         if not 0 < self.max_trade_price <= 1.0:
             errors.append(f"MAX_TRADE_PRICE должен быть в (0, 1.0], сейчас {self.max_trade_price}")
+        if self.accumulation_window_seconds < 60:
+            errors.append("ACCUMULATION_WINDOW_SECONDS < 60 — окно накопления слишком узкое")
         return errors
