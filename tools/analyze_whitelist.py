@@ -1,34 +1,75 @@
-"""
-analyze_whitelist.py v3 — winrate через /activity (REDEEM vs BUY).
+#!/usr/bin/env python3
+"""Скоринг кандидатов в whitelist по ДЕНЬГАМ, а не по числу погашений.
 
-Логика:
-    - Грузим всю активность трейдера (/activity, до 500 записей)
-    - REDEEM по conditionId = выиграл этот рынок
-    - BUY по conditionId без REDEEM = проиграл (позиция закрылась в 0)
-    - winrate = кол-во выигранных conditionId / все завершённые conditionId
+Почему переписано (30.08.2026)
+------------------------------
+Версия v3 считала winrate как «REDEEM по conditionId = рынок выигран,
+BUY без REDEEM = проигран». Метрика оказалась негодной: тот, кто скупает
+много исходов в NegRisk-рынке, гасит выигравшую ногу почти всегда и
+показывает 100% побед, теряя при этом деньги.
+
+Проверка на живых данных:
+  0xC41D736b       v3: «100% winrate, ROI +$257k»  -> реально -$400k за 56 дн
+  LaBradfordSmith22 v3: «100% winrate, ROI +$685k» -> реально -$152k за 37 дн
+
+Что считаем теперь
+------------------
+Денежный поток по всей доступной истории:
+
+    PnL = (SELL + REDEEM + текущая стоимость открытых позиций) - BUY
+
+Это ровно «сколько человек заработал», без предположений о том, что значит
+погашение. Плюс профиль торговли — он решает, годится ли адрес для
+копирования вообще:
+
+  * давность последней сделки — мёртвые адреса копировать не с чего;
+  * сделок за 30 дней — у кого их сотни, тот маркет-мейкер или скальпер:
+    его edge не в информации, а в потоке, и копировать его бессмысленно;
+  * типичный и крупный размер сделки — чтобы Ветка B ловила не любую
+    сделку от $200, а нетипично крупную ДЛЯ ЭТОГО кошелька.
+
+Ограничение: /activity отдаёт историю страницами по 500 событий. У активных
+адресов --max-pages упирается в несколько месяцев, а не в весь срок жизни.
+Обрезка играет В ПОЛЬЗУ трейдера ((погашения старых позиций попадают в окно,
+а покупки под них — нет), так что отрицательный PnL на таком окне — вывод
+надёжный, положительный — требует осторожности.
 
 Запуск:
-    python tools/analyze_whitelist.py
+    python tools/analyze_whitelist.py                     # адреса из data/whitelist.txt
+    python tools/analyze_whitelist.py --file кандидаты.txt
+    python tools/analyze_whitelist.py --max-pages 20
 
-Результат (в data/):
-    - data/whitelist_analysis.json
-    - data/whitelist_filtered.txt
+Результат:
+    data/whitelist_scored.json     — полный разбор по каждому адресу
+    data/whitelist_proposed.txt    — готовый список с метаданными
+Боевой data/whitelist.txt не трогается: сравни и переименуй сам.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from statistics import median
 
 import requests
 
-# Результаты кладём в data/ рядом с боевым whitelist.txt.
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
-OUT_JSON = DATA_DIR / "whitelist_analysis.json"
-OUT_TXT = DATA_DIR / "whitelist_filtered.txt"
+OUT_JSON = DATA_DIR / "whitelist_scored.json"
+OUT_TXT = DATA_DIR / "whitelist_proposed.txt"
+
+DATA_API = "https://data-api.polymarket.com"
+# Публичный лидерборд Polymarket. Окна: 1d / 7d / 30d / all, максимум 50 строк
+# за запрос. Это единственный официальный способ получить список тех, кто
+# реально зарабатывает на площадке — вручную такой список не собрать.
+LB_API = "https://lb-api.polymarket.com"
+LB_WINDOWS = ("30d", "7d", "all")
+LB_LIMIT = 50
+TIMEOUT = 30
+REQUEST_DELAY = 0.35
+PAGE = 500
 
 # Windows-консоль работает в cp866/cp1251 и не знает части символов (стрелки,
 # галочки). Пока вывод идёт в консоль, Python печатает их через WriteConsoleW,
@@ -37,256 +78,248 @@ OUT_TXT = DATA_DIR / "whitelist_filtered.txt"
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(errors="replace")
-    except (AttributeError, ValueError):  # не TextIOWrapper — не наша забота
+    except (AttributeError, ValueError):
         pass
 
-# ── Настройки ────────────────────────────────────────────────────
-MIN_WINRATE   = 0.80   # минимальный winrate
-MIN_RESOLVED  = 5      # минимум завершённых рынков для надёжной статистики
-REQUEST_DELAY = 0.7    # пауза между запросами (сек)
-TIMEOUT       = 15
-DATA_API      = "https://data-api.polymarket.com"
 
-CANDIDATES = {
-    # === Старый whitelist (12) ===
-    "0x9495425feeb0c250accb89275c97587011b19a27": "LaBradfordSmith22",
-    "0x6ac5bb06a9eb05641fd5e82640268b92f3ab4b6e": "Lakersfan111",
-    "0xb652e5dabc3fccd3c939acab0108f99866842db4": "0x2a2C53b (анон)",
-    "0xe26cacfaa3f695a2a239e5918936b10d56f188cf": "Dvitaminbets",
-    "0x5257aa84944804bbb0c718814ebebeeafaca3e2a": "NO-GOD-PLEASE-NO",
-    "0x9ac2536ed93f8fe8ce91d9662b03bcbb19ccbe3d": "ChloeT1",
-    "0xfbf3d501e88815464642d0e913f15379c3eeb218": "VPenguin",
-    "0xe72bb501df5306c75c89383d48a1e81073fbb0a0": "norrisfan",
-    "0x37e4728b3c4607fb2b3b205386bb1d1fb1a8c991": "SemyonMarmeladov",
-    "0x5c3a1a602848565bb16165fcd460b00c3d43020b": "embarrassment",
-    "0xc41d736bded9ed1accd6a44235039266219774fd": "0xC41D736b (#29)",
-    "0x45c9c799e0e6ddf19c50e9dac5ab5a925f9b414b": "Uzim000",
-    # === Новые (44) ===
-    "0x160771e1041ea85cb780f6f9216de8e56259121e": "orangexyz",
-    "0x384fdc42f4f9cdee6b311c5d0dba6f81eb4658ad": "Political-Predator",
-    "0x03bac23a9d3285eb748b3fabd4c9653d11fda1ef": "KairosHunter",
-    "0xcddfe6ceef57bbb2afcb68db611e4ffe26b81b3f": "krimut",
-    "0xecaa8806a9a05049d7d5260a33dc924220e377a9": "Hisokaaa",
-    "0x87650b9f63563f7c456d9bbcceee5f9faf06ed81": "BobBiswas",
-    "0xfd22b8843ae03a33a8a4c5e39ef1e5ff33ebad91": "2B9S",
-    "0x88c4919de76e526d55a32c1f8afb439dd1f1129a": "8934394839",
-    "0x9236b31fe717c7cda64ad753a3ad3eb4e304e368": "LelouchVilndia",
-    "0x613c89dbddbb5c7726eda68911f57fb2cbdee423": "george6688",
-    "0x1681006e2a5c3ca35767f215947326591180b1c7": "shuanyang",
-    "0x9ba9dec33838f4ec9f032f7247d7481987e63ce9": "TeamA",
-    "0x2974bd0059e48f215c391882976e0f1b4c8c9c23": "65765757",
-    "0x3de4543d599ffb09386aac2eab198a295511b032": "248188374",
-    "0x57cd939930fd119067ca9dc42b22b3e15708a0fb": "Supah9ga",
-    "0x53757615de1c42b83f893b79d4241a009dc2aeea": "0x53757615 (#13)",
-    "0xc4f8b9cfffec674b34ba2679a920ef5498ec96a4": "feiqiu",
-    "0x033f0346c007323030eb420305ffede19a95618e": "TheVeryGoodCow",
-    "0xe8dd7741ccb12350957ec71e9ee332e0d1e6ec86": "influenz.eth",
-    "0xefddbb135e2cc2648e3ca6a6b3d4fa4994d5017f": "maxgreen",
-    "0xc96e5287ab294ac0388c2ddb00180fc464cff1f9": "wigglew",
-    "0x398dafc40ced1757f33a263d809f18666ba5c7c3": "Shaktigulya",
-    "0x706ccabb8023add7fe4e773aaaab812eb2d6a94b": "horiz0n",
-    "0xa6d9b55a6a3a54a9d50ca94c64f00af69c50fd2f": "Amrosein",
-    "0xa8c63f775ddbbe66b56614191747def3021444e8": "kinderSman",
-    "0xcb25c43d98019b6acf4d6912a231bbb689a45ab5": "Tenebrus7",
-    "0x612b36dc9ab6d1371103557ec8ad9ed0d2d16fdd": "aaron107",
-    "0x0c0e270cf879583d6a0142fc817e05b768d0434e": "The Spirit of Ukraine>UMA",
-    "0xf1bf47707b8e4cec6292eaa6bc47dc25871411d7": "mikemoneywire-20419",
-    "0xbeb9d19f10274da29f21625a2c91fa5a00fd3870": "AnonymousElephant69",
-    "0x7523cafcee7bcf2db9a79d80e0d79b88a9a54c4c": "DonaldinhoTrumpito",
-    "0xf66166919d7d7afc3406d2dd36dd954a2f822259": "suvorov",
-    "0x8e77537e059837d3c2ca5b4efe75e74e9498c4f3": "dwpoker",
-    "0x1a3fb05e94caef23e28905767cd603eb574a6dea": "alextalley",
-    "0x7bb244d0c70293e66dee84f3d0623fbbbf7d682c": "WongKimArk",
-    "0x8de5e02553b6afba268e0ccf91f50d881d1f2b04": "adribici",
-    "0x16cbe223607a6513ae76d1e3751c78e4eabc2704": "MRF",
-    "0xc7a968ac87984729453ba1776d9567f2c8144081": "Rehman010",
-    "0x75d4c19708ad084c1cf6a10cfdf528c76fd94027": "maduroisq",
-    "0xc4d1a863e9cc45d02ba22d3a1ae9ba7822018ce8": "rdba",
-    "0x45b0efd6a5bdbd114d9ed30c505cfbaea1eb4857": "Valued",
-    "0x40672269263fe09685e07fd99042fd58956f6ffa": "wenwenwenwenwenwen",
-    "0x63b10df4bfa6d03b909ae728ee79964a594c1676": "mostobesegoldfish",
-    "0xe74d4976e5e034182d708a3b9df602e72d4722fd": "Pump",
-}
+# ───────── пороги классификации ─────────
+
+MAX_SILENT_DAYS = 45.0      # дольше молчит — копировать нечего
+MIN_PNL_USDC = 5_000.0      # ниже — не отличить от шума
+MIN_ROI = 0.03              # 3% на вложенный доллар
+MAX_TRADES_30D = 150        # выше — поток, а не решения; копировать бессмысленно
+MIN_TRADES_30D = 3          # ниже — сигналов от него всё равно не будет
 
 
-def fetch_activity(address: str, limit: int = 500) -> Optional[list]:
-    """GET /activity?user=ADDRESS&limit=N"""
-    try:
-        r = requests.get(
-            f"{DATA_API}/activity",
-            params={"user": address, "limit": limit},
-            timeout=TIMEOUT,
-        )
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        return data if isinstance(data, list) else None
-    except Exception:
-        return None
+def get(url: str, params: dict, tries: int = 3):
+    for attempt in range(tries):
+        try:
+            r = requests.get(url, params=params, timeout=TIMEOUT)
+            if r.status_code == 200:
+                return r.json()
+        except requests.RequestException:
+            pass
+        time.sleep(2 * (attempt + 1))
+    return None
 
 
-def analyze_address(address: str, nickname: str) -> dict:
-    result = {
-        "address":        address,
-        "nickname":       nickname,
-        "winrate":        None,
-        "won":            0,
-        "lost":           0,
-        "resolved":       0,
-        "open":           0,
-        "total_redeemed": 0.0,
-        "total_invested": 0.0,
-        "error":          None,
-        "pass":           False,
-        "note":           "",
+def fetch_activity(address: str, max_pages: int) -> list:
+    """Вся доступная активность адреса, страницами по 500."""
+    out = []
+    for page in range(max_pages):
+        chunk = get(f"{DATA_API}/activity",
+                    {"user": address, "limit": PAGE, "offset": page * PAGE})
+        if not chunk:
+            break
+        out.extend(chunk)
+        if len(chunk) < PAGE:
+            break
+        time.sleep(REQUEST_DELAY)
+    return out
+
+
+def fetch_open_value(address: str) -> float:
+    """Текущая стоимость открытых позиций — незакрытая часть капитала."""
+    pos = get(f"{DATA_API}/positions", {"user": address, "limit": 500})
+    if not pos:
+        return 0.0
+    return sum(float(p.get("currentValue") or 0) for p in pos)
+
+
+def analyze(address: str, nickname: str, max_pages: int, now: float) -> dict:
+    acts = fetch_activity(address, max_pages)
+    if not acts:
+        return {"address": address, "nickname": nickname, "verdict": "НЕТ ДАННЫХ",
+                "reason": "activity пуст или API не ответил"}
+
+    trades = [a for a in acts if a.get("type") == "TRADE"]
+    if not trades:
+        return {"address": address, "nickname": nickname, "verdict": "DROP",
+                "reason": "ни одной сделки в истории"}
+
+    def usdc(a) -> float:
+        return float(a.get("usdcSize") or 0)
+
+    buys = [a for a in trades if a.get("side") == "BUY"]
+    money_in = sum(usdc(a) for a in buys)
+    money_out = sum(usdc(a) for a in trades if a.get("side") == "SELL")
+    money_out += sum(usdc(a) for a in acts if a.get("type") == "REDEEM")
+    open_value = fetch_open_value(address)
+
+    pnl = money_out + open_value - money_in
+    roi = (pnl / money_in) if money_in > 0 else 0.0
+
+    last_ts = max(a["timestamp"] for a in trades)
+    silent_days = (now - last_ts) / 86400.0
+    trades_30d = sum(1 for a in trades if now - a["timestamp"] < 30 * 86400)
+    span_days = (last_ts - min(a["timestamp"] for a in trades)) / 86400.0
+
+    buy_sizes = sorted(usdc(a) for a in buys if usdc(a) > 0)
+    typical = median(buy_sizes) if buy_sizes else 0.0
+    # Порог «нетипично крупно для него»: 90-й процентиль его же покупок.
+    big = buy_sizes[int(len(buy_sizes) * 0.9)] if buy_sizes else 0.0
+
+    res = {
+        "address": address, "nickname": nickname,
+        "pnl_usdc": round(pnl), "roi": round(roi, 4),
+        "money_in_usdc": round(money_in), "money_out_usdc": round(money_out),
+        "open_value_usdc": round(open_value),
+        "silent_days": round(silent_days, 1), "trades_30d": trades_30d,
+        "trades_total": len(trades), "history_span_days": round(span_days, 1),
+        "typical_buy_usdc": round(typical), "big_buy_usdc": round(big),
+        "history_truncated": len(acts) >= max_pages * PAGE,
     }
 
-    activity = fetch_activity(address)
-    time.sleep(REQUEST_DELAY)
-
-    if activity is None:
-        result["error"] = "API failed"
-        return result
-
-    if not activity:
-        result["note"] = "нет активности"
-        return result
-
-    # Группируем по conditionId
-    # bought[cid]  = общая сумма вложений (usdcSize BUY)
-    # redeemed[cid] = сумма забранного (usdcSize REDEEM)
-    bought   = {}   # cid -> total usdcSize invested
-    redeemed = {}   # cid -> total usdcSize redeemed
-
-    for event in activity:
-        cid  = event.get("conditionId", "")
-        typ  = (event.get("type") or "").upper()
-        side = (event.get("side") or "").upper()
-        usdc = float(event.get("usdcSize") or 0)
-
-        if not cid:
-            continue
-
-        if typ == "TRADE" and side == "BUY":
-            bought[cid] = bought.get(cid, 0) + usdc
-
-        elif typ == "REDEEM":
-            redeemed[cid] = redeemed.get(cid, 0) + usdc
-
-    # Определяем завершённые рынки:
-    # Завершённый = был BUY и либо есть REDEEM (выиграл) либо нет (проиграл)
-    # Только-REDEEM без BUY пропускаем (мог купить раньше лимита выборки)
-    all_bought = set(bought.keys())
-
-    won_cids  = {cid for cid in all_bought if cid in redeemed}
-    lost_cids = {cid for cid in all_bought if cid not in redeemed}
-
-    # Открытые позиции — где ещё нет результата (рынок не закрылся).
-    # Мы не можем их точно определить без Gamma API, поэтому считаем
-    # консервативно: все bought без redeem = проигрыш или открытая позиция.
-    # Для минимизации ошибки — считаем только рынки где есть REDEEM как won,
-    # а lost — только те где купил но нет redeem И активность старше 7 дней.
-    # (свежие могут быть просто открытыми)
-
-    now_ts = int(time.time())
-    WEEK = 7 * 86400
-
-    # Находим timestamp последней активности по каждому conditionId
-    cid_last_ts = {}
-    for event in activity:
-        cid = event.get("conditionId", "")
-        ts  = int(event.get("timestamp") or 0)
-        if cid and ts:
-            cid_last_ts[cid] = max(cid_last_ts.get(cid, 0), ts)
-
-    # lost = bought без redeem, где последняя активность > 7 дней назад
-    confirmed_lost = {
-        cid for cid in lost_cids
-        if (now_ts - cid_last_ts.get(cid, now_ts)) > WEEK
-    }
-    open_cids = lost_cids - confirmed_lost
-
-    won   = len(won_cids)
-    lost  = len(confirmed_lost)
-    resolved = won + lost
-
-    result["won"]            = won
-    result["lost"]           = lost
-    result["resolved"]       = resolved
-    result["open"]           = len(open_cids)
-    result["total_redeemed"] = round(sum(redeemed.values()), 2)
-    result["total_invested"] = round(sum(bought.values()), 2)
-
-    if resolved >= MIN_RESOLVED:
-        result["winrate"] = round(won / resolved, 4)
-        result["pass"]    = result["winrate"] >= MIN_WINRATE
+    # ───────── вердикт ─────────
+    if silent_days > MAX_SILENT_DAYS:
+        res.update(verdict="DROP", reason=f"молчит {silent_days:.0f} дн")
+    elif pnl <= 0:
+        res.update(verdict="DROP", reason=f"PnL ${pnl:,.0f} — теряет деньги")
+    elif trades_30d > MAX_TRADES_30D:
+        res.update(verdict="WATCH",
+                   reason=f"{trades_30d} сделок/30д — поток, а не решения")
+    elif trades_30d < MIN_TRADES_30D:
+        res.update(verdict="WATCH", reason=f"почти не торгует ({trades_30d}/30д)")
+    elif pnl < MIN_PNL_USDC or roi < MIN_ROI:
+        res.update(verdict="WATCH",
+                   reason=f"слабо: ${pnl:,.0f} при ROI {roi*100:.1f}%")
     else:
-        result["note"] = f"мало данных ({resolved} завершённых рынков)"
+        res.update(verdict="PASS",
+                   reason=f"${pnl:,.0f} при ROI {roi*100:.1f}%, {trades_30d} сделок/30д")
+    return res
 
-    return result
+
+def fetch_leaderboard(windows=LB_WINDOWS, limit: int = LB_LIMIT) -> list:
+    """Кандидаты с лидерборда по прибыли, объединённые по окнам.
+
+    Окна берём разные не случайно: "all" даёт заслуженных ветеранов, которые
+    могли давно остыть, "30d" — тех, кто в форме прямо сейчас. Дубликаты
+    схлопываем, дальше каждого всё равно проверяет полный скоринг.
+    """
+    seen = {}
+    for window in windows:
+        data = get(f"{LB_API}/profit", {"window": window, "limit": limit})
+        if not data:
+            print(f"  лидерборд {window}: не ответил")
+            continue
+        print(f"  лидерборд {window}: {len(data)} адресов")
+        for row in data:
+            addr = str(row.get("proxyWallet") or "").lower()
+            if not addr.startswith("0x"):
+                continue
+            nick = row.get("pseudonym") or row.get("name") or addr[:10]
+            # Ник первого попадания сохраняем, окно дописываем к нему.
+            if addr in seen:
+                seen[addr] = (seen[addr][0], seen[addr][1] + f",{window}")
+            else:
+                seen[addr] = (str(nick), window)
+        time.sleep(REQUEST_DELAY)
+    return [(a, f"{n} [{w}]") for a, (n, w) in seen.items()]
 
 
-def main():
-    candidates = list(CANDIDATES.items())
-    total = len(candidates)
-    print(f"Анализируем {total} адресов через /activity...\n")
+def load_candidates(path: Path) -> list:
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        addr = line.split("#")[0].strip().split()[0].lower()
+        nick = "?"
+        if "#" in line:
+            nick = line.split("#", 1)[1].split("|")[0].strip() or "?"
+        if addr.startswith("0x") and len(addr) == 42:
+            out.append((addr, nick))
+    return out
 
+
+def main() -> int:
+    p = argparse.ArgumentParser(description="Скоринг кандидатов в whitelist по деньгам.")
+    p.add_argument("--file", default=str(DATA_DIR / "whitelist.txt"),
+                   help="файл с адресами (default: data/whitelist.txt)")
+    p.add_argument("--max-pages", type=int, default=12,
+                   help="страниц истории по 500 событий (default: 12)")
+    p.add_argument("--from-leaderboard", action="store_true",
+                   help="взять кандидатов с лидерборда Polymarket вместо файла")
+    p.add_argument("--plus-current", action="store_true",
+                   help="с --from-leaderboard: добавить текущий whitelist к кандидатам")
+    args = p.parse_args()
+
+    if args.from_leaderboard:
+        print("Собираю кандидатов с лидерборда Polymarket:")
+        cands = fetch_leaderboard()
+        if args.plus_current and Path(args.file).exists():
+            current = load_candidates(Path(args.file))
+            known = {a for a, _ in cands}
+            extra = [(a, n) for a, n in current if a not in known]
+            cands += extra
+            print(f"  плюс текущий whitelist: +{len(extra)} адресов")
+        if not cands:
+            print("[ОШИБКА] Лидерборд не ответил — попробуй позже")
+            return 1
+    else:
+        src = Path(args.file)
+        if not src.exists():
+            print(f"[ОШИБКА] Нет файла {src}")
+            return 1
+        cands = load_candidates(src)
+    print(f"Кандидатов: {len(cands)}. История: до {args.max_pages * PAGE} событий на адрес.")
+    print("Это займёт время — API отдаёт страницами по 500.\n")
+
+    now = time.time()
     results = []
-    for i, (address, nickname) in enumerate(candidates, 1):
-        pct = int(i / total * 100)
-        bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
-        print(f"\r[{bar}] {pct}% ({i}/{total}) {nickname[:25]:<25}", end="", flush=True)
-        result = analyze_address(address, nickname)
-        results.append(result)
+    for i, (addr, nick) in enumerate(cands, 1):
+        print(f"[{i}/{len(cands)}] {nick[:24]:24} {addr[:12]}...", flush=True)
+        results.append(analyze(addr, nick, args.max_pages, now))
+        time.sleep(REQUEST_DELAY)
 
-    print("\n\nГотово!\n")
+    order = {"PASS": 0, "WATCH": 1, "DROP": 2, "НЕТ ДАННЫХ": 3}
+    results.sort(key=lambda r: (order.get(r.get("verdict"), 9), -r.get("pnl_usdc", 0)))
 
-    results.sort(key=lambda x: x["winrate"] or 0, reverse=True)
+    print("\n" + "=" * 108)
+    print(f"{'вердикт':8} {'ник':22} {'PnL':>12} {'ROI':>8} {'молчит':>8} "
+          f"{'сд/30д':>7} {'типичная':>9} {'крупная':>9}")
+    print("-" * 108)
+    for r in results:
+        if "pnl_usdc" not in r:
+            print(f"{r['verdict']:8} {r['nickname'][:22]:22} {r.get('reason','')}")
+            continue
+        print(f"{r['verdict']:8} {r['nickname'][:22]:22} ${r['pnl_usdc']:>11,} "
+              f"{r['roi']*100:>7.1f}% {r['silent_days']:>7.0f}д {r['trades_30d']:>7} "
+              f"${r['typical_buy_usdc']:>8,} ${r['big_buy_usdc']:>8,}")
+    print("=" * 108)
 
-    with open(OUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
-    print(f"Полная статистика → {OUT_JSON}")
+    counts = {}
+    for r in results:
+        counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
+    print("Итог:", ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())))
 
-    passed  = [r for r in results if r["pass"]]
-    failed  = [r for r in results if r["winrate"] is not None and not r["pass"]]
-    no_data = [r for r in results if r["winrate"] is None and not r["error"]]
-    errors  = [r for r in results if r["error"]]
+    OUT_JSON.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"\nПолный разбор -> {OUT_JSON}")
 
-    print(f"\n{'='*65}")
-    print(f"ПРОШЛИ (winrate >= {MIN_WINRATE*100:.0f}%, >= {MIN_RESOLVED} рынков): {len(passed)}")
-    print(f"{'='*65}")
-    for r in passed:
-        wr  = f"{r['winrate']*100:.1f}%"
-        roi = f"${r['total_redeemed'] - r['total_invested']:+,.0f}"
-        print(f"  {wr:>6}  {r['won']:>3}W/{r['lost']:>3}L  ROI {roi:>10}  {r['nickname']}")
-
-    print(f"\n{'='*65}")
-    print(f"НЕ прошли: {len(failed)}")
-    print(f"{'='*65}")
-    for r in failed:
-        wr = f"{r['winrate']*100:.1f}%"
-        print(f"  {wr:>6}  {r['won']:>3}W/{r['lost']:>3}L  {r['nickname']}")
-
-    print(f"\n{'='*65}")
-    print(f"Нет данных: {len(no_data)}  |  Ошибки: {len(errors)}")
-    print(f"{'='*65}")
-    for r in no_data:
-        print(f"  {r['nickname']:35} — {r['note']}")
-    for r in errors:
-        print(f"  ERROR: {r['nickname']} — {r['error']}")
-
-    with open(OUT_TXT, "w", encoding="utf-8") as f:
-        f.write("# Whitelist Polymarket трейдеров\n")
-        f.write(f"# Фильтр: winrate >= {MIN_WINRATE*100:.0f}%, min {MIN_RESOLVED} завершённых рынков\n")
-        f.write(f"# Сгенерировано: {time.strftime('%Y-%m-%d %H:%M')}\n")
-        f.write(f"# Всего: {len(passed)} адресов\n\n")
-        for r in passed:
-            wr = f"{r['winrate']*100:.1f}%"
-            f.write(f"{r['address']}  # {r['nickname']} (winrate {wr}, {r['won']}W/{r['lost']}L)\n")
-
-    print(f"\nГотовый whitelist → {OUT_TXT} ({len(passed)} адресов)")
-    print(f"Полный разбор по каждому адресу — в {OUT_JSON}")
+    keep = [r for r in results if r["verdict"] in ("PASS", "WATCH")]
+    lines = [
+        "# Whitelist Polymarket — отобран по денежному потоку, не по winrate",
+        f"# Сгенерировано: {time.strftime('%Y-%m-%d %H:%M')} (tools/analyze_whitelist.py)",
+        "#",
+        "# PnL = (SELL + REDEEM + открытые позиции) - BUY по доступной истории.",
+        "# tier=pass  — зарабатывает и торгует с разумной частотой;",
+        "# tier=watch — держим под наблюдением, сигналить осторожнее;",
+        "# big=$N     — 90-й процентиль его покупок: порог «крупно ДЛЯ НЕГО».",
+        "#",
+        f"# Отброшено: {counts.get('DROP', 0)} адресов (мертвы или теряют деньги).",
+        "",
+    ]
+    for r in keep:
+        lines.append(
+            f"{r['address']}  # {r['nickname']} | tier={r['verdict'].lower()} | "
+            f"pnl=${r['pnl_usdc']:,} roi={r['roi']*100:.1f}% | "
+            f"big=${r['big_buy_usdc']:,} | {r['reason']}"
+        )
+    OUT_TXT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Предлагаемый список -> {OUT_TXT} ({len(keep)} адресов)")
+    print("Боевой data/whitelist.txt НЕ тронут — сравни и переименуй сам.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

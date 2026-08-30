@@ -85,15 +85,27 @@ class AnomalyDetector:
 
         # ── Ветка B: Whitelist ──
         # Первая, т.к. не требует ни метаданных рынка, ни запросов к БД.
-        if self.watchlist.is_whitelisted(trade.maker):
-            if trade.usdc_amount >= self.config.whitelist_min_usdc and market:
+        entry = self.watchlist.get(trade.maker)
+        if entry is not None and market and entry.signals_on_its_own:
+            # Персональный порог: 90-й процентиль покупок этого кошелька.
+            # $200 от того, кто обычно ставит $5000, — шум; $2000 от того,
+            # кто обычно ставит $200, — редкая уверенность.
+            threshold = max(self.config.whitelist_min_usdc, entry.big_usdc)
+            if trade.usdc_amount >= threshold:
+                personal = (
+                    f", крупно для него (порог ${entry.big_usdc:,.0f})"
+                    if entry.big_usdc > self.config.whitelist_min_usdc else ""
+                )
                 result.signals.append(
                     Signal(
                         signal_type="whitelist",
                         trade=trade,
                         market=market,
                         wallet=wallet,
-                        reason=f"Whitelisted кошелёк, ${trade.usdc_amount:.0f}",
+                        reason=(
+                            f"Whitelist {entry.nickname or trade.maker[:10]}, "
+                            f"${trade.usdc_amount:.0f}{personal}"
+                        ),
                     )
                 )
 
@@ -110,7 +122,10 @@ class AnomalyDetector:
         if not self._passes_hard_gates(trade, market):
             return result
 
-        features = self.features.extract(trade, market, wallet)
+        features = self.features.extract(
+            trade, market, wallet,
+            whitelist_tier=entry.tier if entry is not None else "",
+        )
         score = compute_score(features, self.config)
         result.score = score
 

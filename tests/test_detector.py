@@ -4,17 +4,27 @@ from __future__ import annotations
 from conftest import NOW, make_market, make_trade, make_wallet
 
 from polymarket_tracker.anomaly_detector import AnomalyDetector
+from polymarket_tracker.watchlist import WhitelistEntry
 
 
 class FakeWatchlist:
+    """Двойник Watchlist. Принимает либо адреса, либо готовые WhitelistEntry —
+    чтобы проверять уровни и персональные пороги."""
+
     def __init__(self, addresses=()):
-        self._a = {a.lower() for a in addresses}
+        self._e = {}
+        for a in addresses:
+            entry = a if isinstance(a, WhitelistEntry) else WhitelistEntry(address=a.lower())
+            self._e[entry.address.lower()] = entry
+
+    def get(self, address: str):
+        return self._e.get(address.lower())
 
     def is_whitelisted(self, address: str) -> bool:
-        return address.lower() in self._a
+        return self.get(address) is not None
 
     def __len__(self):
-        return len(self._a)
+        return len(self._e)
 
 
 def detector(config, storage, whitelist=()):
@@ -165,3 +175,59 @@ class TestAccumulationEndToEnd:
         assert r.score.parts.get("accumulation") == 15
         # прежняя цепочка И такую сделку не увидела бы вовсе
         assert r.legacy_passed is False
+
+
+class TestWhitelistTiers:
+    """Персональные пороги и уровни. Смысл: $200 от того, кто обычно ставит
+    $5000, — шум, а $2000 от того, кто обычно ставит $200, — редкая уверенность."""
+
+    ADDR = "0x" + "f" * 40
+
+    def _eval(self, config, storage, entry, usdc):
+        t = make_trade(maker=self.ADDR, usdc=usdc)
+        save(storage, t)
+        d = detector(config, storage, whitelist=[entry])
+        return d.evaluate(t, make_market(), make_wallet())
+
+    def _wl(self, res):
+        return [s for s in res.signals if s.signal_type == "whitelist"]
+
+    def test_pass_ниже_личного_порога_не_сигналит(self, config, storage):
+        entry = WhitelistEntry(self.ADDR, tier="pass", big_usdc=2000.0)
+        res = self._eval(config, storage, entry, usdc=800)   # выше общего, ниже личного
+        assert self._wl(res) == []
+
+    def test_pass_на_личном_пороге_сигналит(self, config, storage):
+        entry = WhitelistEntry(self.ADDR, tier="pass", big_usdc=2000.0)
+        res = self._eval(config, storage, entry, usdc=2000)
+        assert len(self._wl(res)) == 1
+        assert "крупно для него" in self._wl(res)[0].reason
+
+    def test_без_личного_порога_работает_общий(self, config, storage):
+        """Старый формат файла: big не указан — поведение как раньше."""
+        entry = WhitelistEntry(self.ADDR, tier="pass", big_usdc=0.0)
+        res = self._eval(config, storage, entry, usdc=config.whitelist_min_usdc)
+        assert len(self._wl(res)) == 1
+
+    def test_watch_своего_сигнала_не_даёт(self, config, storage):
+        entry = WhitelistEntry(self.ADDR, tier="watch", big_usdc=0.0)
+        res = self._eval(config, storage, entry, usdc=50_000)
+        assert self._wl(res) == []
+
+    def test_watch_добавляет_баллы_скорингу(self, config, storage):
+        """Своего сигнала нет, но как признак адрес учитывается."""
+        entry = WhitelistEntry(self.ADDR, tier="watch", big_usdc=0.0)
+        res = self._eval(config, storage, entry, usdc=9000)
+        assert res.score is not None
+        assert res.score.parts.get("whitelist") == 15
+
+    def test_pass_тоже_добавляет_баллы(self, config, storage):
+        entry = WhitelistEntry(self.ADDR, tier="pass", big_usdc=0.0)
+        res = self._eval(config, storage, entry, usdc=9000)
+        assert res.score.parts.get("whitelist") == 30
+
+    def test_адрес_вне_списка_баллов_не_получает(self, config, storage):
+        t = make_trade(maker="0x" + "c" * 40, usdc=9000)
+        save(storage, t)
+        res = detector(config, storage).evaluate(t, make_market(), make_wallet())
+        assert "whitelist" not in (res.score.parts if res.score else {})

@@ -90,6 +90,12 @@ ILLIQUID_POINTS = 10
 # (новизна, кластер новых): в свежей БД «новый» значит лишь «мы его не видели».
 HISTORY_MIN_DAYS = 3.0
 
+# Баллы за присутствие в whitelist. Уровень watch своего сигнала не даёт
+# (см. watchlist.py), но как признак он ценен: покупка от того, кто на
+# площадке в плюсе, — довод в пользу сделки.
+WHITELIST_PASS_POINTS = 30
+WHITELIST_WATCH_POINTS = 15
+
 MARKET_MAKER_PENALTY = -40
 NEAR_RESOLVED_PENALTY = -25
 
@@ -116,6 +122,7 @@ class Features:
     is_market_maker: bool
     price: float
     volume_24h: float
+    whitelist_tier: str = ""  # "pass" | "watch" | "" — уровень в whitelist
 
 
 @dataclass
@@ -184,6 +191,7 @@ class FeatureExtractor:
         trade: "Trade",
         market: "MarketInfo",
         wallet: "WalletAssessment",
+        whitelist_tier: str = "",
     ) -> Features:
         cfg = self.config
         acc_since = trade.timestamp - cfg.accumulation_window_seconds
@@ -230,6 +238,7 @@ class FeatureExtractor:
             cluster_new_wallets=cluster_new,
             cluster_all_wallets=cluster_all,
             history_days=self._history_days(trade.timestamp),
+            whitelist_tier=whitelist_tier,
             is_new_wallet=wallet.is_new,
             is_market_maker=self.storage.wallet_traded_both_sides(
                 trade.maker, trade.token_id
@@ -290,6 +299,13 @@ def compute_score(features: Features, config: "Config") -> Score:
                 f"кластер: {f.cluster_new_wallets} новых кошельков "
                 f"из {f.cluster_all_wallets} участников за окно"
             )
+
+    if f.whitelist_tier == "pass":
+        parts["whitelist"] = WHITELIST_PASS_POINTS
+        notes.append("адрес из whitelist (tier=pass)")
+    elif f.whitelist_tier == "watch":
+        parts["whitelist"] = WHITELIST_WATCH_POINTS
+        notes.append("адрес из whitelist (tier=watch)")
 
     pts = _steps_desc(f.price, CHEAP_TAIL_STEPS)
     if pts:
