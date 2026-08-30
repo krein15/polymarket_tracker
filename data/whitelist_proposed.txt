@@ -1,5 +1,5 @@
 # Whitelist Polymarket — отобран по денежному потоку, не по winrate
-# Сгенерировано: 2026-08-30 20:54 (tools/analyze_whitelist.py)
+# Сгенерировано: 2026-08-30 20:58 (tools/analyze_whitelist.py)
 #
 # PnL = (SELL + REDEEM + открытые позиции) - BUY за окно, причём выручка
 # считается только по рынкам, куда трейдер заходил ВНУТРИ окна.
@@ -7,12 +7,29 @@
 # tier=watch — держим под наблюдением, сигналить осторожнее;
 # big=$N     — 90-й процентиль его покупок: порог «крупно ДЛЯ НЕГО».
 #
-# Отброшено: 8 адресов (мертвы или теряют деньги).
+# Отброшено: 108 адресов (мертвы или теряют деньги).
 
-0x033f0346c007323030eb420305ffede19a95618e  # TheVeryGoodCow | tier=pass | pnl=$39,929 roi=5.9% | big=$346 | $39,929 при ROI 5.9%, 107 сделок/30д
-0xc96e5287ab294ac0388c2ddb00180fc464cff1f9  # wigglew | tier=watch | pnl=$78,555 roi=3.4% | big=$944 | 1051 сделок/30д — поток, а не решения
+0x2ba6c2c20075a5c5f6996dd32f080e5d005e644c  # jjj1995 [30d,7d] | tier=pass | pnl=$658,947 roi=24.4% | big=$308,321 | $658,947 при ROI 24.4%, 34 сделок/30д
+0xf28e42d20e4826f2b10a24bc952001697947cab2  # ethanaz [30d,7d] | tier=pass | pnl=$395,688 roi=6.1% | big=$1,852 | $395,688 при ROI 6.1%, 60 сделок/30д
+0xaabec5bfb0c7e2516900c4066ae58073d59e9158  # vd777bond [30d] | tier=pass | pnl=$387,236 roi=32.1% | big=$283,834 | $387,236 при ROI 32.1%, 17 сделок/30д
+0x2dc13c6bda81b202281e796953a7323de675b33c  # xifutloong3 [7d] | tier=pass | pnl=$311,075 roi=7.2% | big=$29,299 | $311,075 при ROI 7.2%, 147 сделок/30д
+0x91dda263d251e7f771ea333f8cb6b6066761600b  # murgionsek [30d] | tier=pass | pnl=$301,611 roi=65.8% | big=$230,019 | $301,611 при ROI 65.8%, 7 сделок/30д
+0xd3a0b4e941b557d33a8efd5a51c581e7c79cf136  # 0xd3A0b4E941B557D33A8EFd5a51c581e7c79cF136-1787996319116 [7d] | tier=pass | pnl=$111,823 roi=12.6% | big=$22,799 | $111,823 при ROI 12.6%, 140 сделок/30д
+0x9319a045cdd0c2180e5eb7ad44374383db9a6410  # sainttroplay [30d,all] | tier=watch | pnl=$3,509,636 roi=76.9% | big=$32,576 | 285 сделок/30д — поток, а не решения
+0xf8831548531d56ad6a4331493243c447a827cd1f  # Inaccuratestake [all] | tier=watch | pnl=$3,508,716 roi=25.1% | big=$13,667 | почти не торгует (0/30д)
+0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748  # 3edmond.dantes [30d,7d,all] | tier=watch | pnl=$3,458,742 roi=48.3% | big=$51,589 | 425 сделок/30д — поток, а не решения
+0x14c7111afa871fb215339f365043d7b2837b9ccf  # kilian7kilian [30d,7d] | tier=watch | pnl=$1,473,606 roi=30.8% | big=$54,503 | 286 сделок/30д — поток, а не решения
+0xb8bafc68fee1a04be137731aa91032a96af1da22  # Baronen11 [7d] | tier=watch | pnl=$118,475 roi=33.8% | big=$1,895 | 426 сделок/30д — поток, а не решения
+0xc96e5287ab294ac0388c2ddb00180fc464cff1f9  # wigglew | tier=watch | pnl=$78,221 roi=3.3% | big=$963 | 1056 сделок/30д — поток, а не решения
+0x05f6cb63d4ffdfaecd7ad8acd0765b6f6a5a25a1  # ethBELIVER [7d] | tier=watch | pnl=$69,524 roi=11.5% | big=$4,447 | 395 сделок/30д — поток, а не решения
+0x033f0346c007323030eb420305ffede19a95618e  # TheVeryGoodCow | tier=watch | pnl=$39,929 roi=5.9% | big=$346 | $39,929 при ROI 5.9%, 107 сделок/30д, но окно 90д не выкачано целиком
 0xb652e5dabc3fccd3c939acab0108f99866842db4  # 0x2a2C53b | tier=watch | pnl=$3 roi=1.6% | big=$100 | почти не торгует (0/30д)
-0x5257aa84944804bbb0c718814ebebeeafaca3e2a  # NO-GOD-PLEASE-NO | tier=watch | ~2549 сделок/30д — поток (отсев по первой странице)
-0xc41d736bded9ed1accd6a44235039266219774fd  # 0xC41D736b | tier=watch | ~2103 сделок/30д — поток (отсев по первой странице)
-0xe72bb501df5306c75c89383d48a1e81073fbb0a0  # norrisfan | tier=watch | ~1205 сделок/30д — поток (отсев по первой странице)
+0x16bb9951a36fce71e2ef57890b786145e0ba8492  # SDTrading [30d] | tier=watch | ~737 сделок/30д — поток (отсев по первой странице)
+0xc2e7800b5af46e6093872b177b7a5e7f0563be51  # beachboy4 [30d,7d,all] | tier=watch | ~452 сделок/30д — поток (отсев по первой странице)
+0xe1000ddb5f5025849765e29d051dfff78f5d4d41  # TeGeeLP [30d] | tier=watch | ~659 сделок/30д — поток (отсев по первой странице)
+0xee00ba338c59557141789b127927a55f5cc5cea1  # S-Works [7d,all] | tier=watch | ~648 сделок/30д — поток (отсев по первой странице)
+0x6e9f61710b1703bb7e0ef7ebe1323c443a1d0eae  # PetsViljandist [7d] | tier=watch | ~1378 сделок/30д — поток (отсев по первой странице)
+0x8a8685a792c184e5c2ee8c7d4d4baba7c2c94998  # BrotherObama [7d] | tier=watch | ~966 сделок/30д — поток (отсев по первой странице)
+0xe72bb501df5306c75c89383d48a1e81073fbb0a0  # norrisfan [7d] | tier=watch | ~1202 сделок/30д — поток (отсев по первой странице)
+0x006cc834cc092684f1b56626e23bedb3835c16ea  # 0x006cc834Cc092684F1B56626E23BEdB3835c16ea-1729683673397 [all] | tier=watch | ~1117 сделок/30д — поток (отсев по первой странице)
 0xa6d9b55a6a3a54a9d50ca94c64f00af69c50fd2f  # Amrosein | tier=watch | ~667 сделок/30д — поток (отсев по первой странице)

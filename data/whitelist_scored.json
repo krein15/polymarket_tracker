@@ -1,5 +1,265 @@
 [
   {
+    "address": "0x2ba6c2c20075a5c5f6996dd32f080e5d005e644c",
+    "nickname": "jjj1995 [30d,7d]",
+    "pnl_usdc": 658947,
+    "roi": 0.244,
+    "money_in_usdc": 2700606,
+    "money_out_usdc": 3359553,
+    "open_value_usdc": 0,
+    "silent_days": 6.0,
+    "trades_30d": 34,
+    "trades_total": 34,
+    "history_span_days": 2.0,
+    "typical_buy_usdc": 40980,
+    "big_buy_usdc": 308321,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 11,
+    "verdict": "PASS",
+    "reason": "$658,947 при ROI 24.4%, 34 сделок/30д"
+  },
+  {
+    "address": "0xf28e42d20e4826f2b10a24bc952001697947cab2",
+    "nickname": "ethanaz [30d,7d]",
+    "pnl_usdc": 395688,
+    "roi": 0.0606,
+    "money_in_usdc": 6528919,
+    "money_out_usdc": 6924607,
+    "open_value_usdc": 0,
+    "silent_days": 0.8,
+    "trades_30d": 60,
+    "trades_total": 4523,
+    "history_span_days": 88.3,
+    "typical_buy_usdc": 47,
+    "big_buy_usdc": 1852,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 373,
+    "verdict": "PASS",
+    "reason": "$395,688 при ROI 6.1%, 60 сделок/30д"
+  },
+  {
+    "address": "0xaabec5bfb0c7e2516900c4066ae58073d59e9158",
+    "nickname": "vd777bond [30d]",
+    "pnl_usdc": 387236,
+    "roi": 0.3214,
+    "money_in_usdc": 1204985,
+    "money_out_usdc": 1592220,
+    "open_value_usdc": 0,
+    "silent_days": 8.2,
+    "trades_30d": 17,
+    "trades_total": 17,
+    "history_span_days": 0.5,
+    "typical_buy_usdc": 36880,
+    "big_buy_usdc": 283834,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 6,
+    "verdict": "PASS",
+    "reason": "$387,236 при ROI 32.1%, 17 сделок/30д"
+  },
+  {
+    "address": "0x2dc13c6bda81b202281e796953a7323de675b33c",
+    "nickname": "xifutloong3 [7d]",
+    "pnl_usdc": 311075,
+    "roi": 0.0725,
+    "money_in_usdc": 4292323,
+    "money_out_usdc": 4603398,
+    "open_value_usdc": 0,
+    "silent_days": 0.8,
+    "trades_30d": 147,
+    "trades_total": 432,
+    "history_span_days": 88.8,
+    "typical_buy_usdc": 4678,
+    "big_buy_usdc": 29299,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 143,
+    "verdict": "PASS",
+    "reason": "$311,075 при ROI 7.2%, 147 сделок/30д"
+  },
+  {
+    "address": "0x91dda263d251e7f771ea333f8cb6b6066761600b",
+    "nickname": "murgionsek [30d]",
+    "pnl_usdc": 301611,
+    "roi": 0.658,
+    "money_in_usdc": 458380,
+    "money_out_usdc": 759992,
+    "open_value_usdc": 0,
+    "silent_days": 8.8,
+    "trades_30d": 7,
+    "trades_total": 7,
+    "history_span_days": 0.1,
+    "typical_buy_usdc": 97544,
+    "big_buy_usdc": 230019,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 2,
+    "verdict": "PASS",
+    "reason": "$301,611 при ROI 65.8%, 7 сделок/30д"
+  },
+  {
+    "address": "0xd3a0b4e941b557d33a8efd5a51c581e7c79cf136",
+    "nickname": "0xd3A0b4E941B557D33A8EFd5a51c581e7c79cF136-1787996319116 [7d]",
+    "pnl_usdc": 111823,
+    "roi": 0.1257,
+    "money_in_usdc": 889644,
+    "money_out_usdc": 932563,
+    "open_value_usdc": 68904,
+    "silent_days": 0.0,
+    "trades_30d": 140,
+    "trades_total": 140,
+    "history_span_days": 1.1,
+    "typical_buy_usdc": 22,
+    "big_buy_usdc": 22799,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 6,
+    "verdict": "PASS",
+    "reason": "$111,823 при ROI 12.6%, 140 сделок/30д"
+  },
+  {
+    "address": "0x9319a045cdd0c2180e5eb7ad44374383db9a6410",
+    "nickname": "sainttroplay [30d,all]",
+    "pnl_usdc": 3509636,
+    "roi": 0.769,
+    "money_in_usdc": 4563771,
+    "money_out_usdc": 8073406,
+    "open_value_usdc": 0,
+    "silent_days": 12.9,
+    "trades_30d": 285,
+    "trades_total": 285,
+    "history_span_days": 2.0,
+    "typical_buy_usdc": 11,
+    "big_buy_usdc": 32576,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 6,
+    "verdict": "WATCH",
+    "reason": "285 сделок/30д — поток, а не решения"
+  },
+  {
+    "address": "0xf8831548531d56ad6a4331493243c447a827cd1f",
+    "nickname": "Inaccuratestake [all]",
+    "pnl_usdc": 3508716,
+    "roi": 0.2508,
+    "money_in_usdc": 13992302,
+    "money_out_usdc": 17501018,
+    "open_value_usdc": 0,
+    "silent_days": 44.0,
+    "trades_30d": 0,
+    "trades_total": 1036,
+    "history_span_days": 45.3,
+    "typical_buy_usdc": 26,
+    "big_buy_usdc": 13667,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 7,
+    "verdict": "WATCH",
+    "reason": "почти не торгует (0/30д)"
+  },
+  {
+    "address": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
+    "nickname": "3edmond.dantes [30d,7d,all]",
+    "pnl_usdc": 3458742,
+    "roi": 0.4829,
+    "money_in_usdc": 7161828,
+    "money_out_usdc": 7539841,
+    "open_value_usdc": 3080730,
+    "silent_days": 0.0,
+    "trades_30d": 425,
+    "trades_total": 425,
+    "history_span_days": 15.0,
+    "typical_buy_usdc": 56,
+    "big_buy_usdc": 51589,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 18,
+    "verdict": "WATCH",
+    "reason": "425 сделок/30д — поток, а не решения"
+  },
+  {
+    "address": "0x14c7111afa871fb215339f365043d7b2837b9ccf",
+    "nickname": "kilian7kilian [30d,7d]",
+    "pnl_usdc": 1473606,
+    "roi": 0.3076,
+    "money_in_usdc": 4790734,
+    "money_out_usdc": 6264339,
+    "open_value_usdc": 0,
+    "silent_days": 0.0,
+    "trades_30d": 286,
+    "trades_total": 286,
+    "history_span_days": 4.9,
+    "typical_buy_usdc": 104,
+    "big_buy_usdc": 54503,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 23,
+    "verdict": "WATCH",
+    "reason": "286 сделок/30д — поток, а не решения"
+  },
+  {
+    "address": "0xb8bafc68fee1a04be137731aa91032a96af1da22",
+    "nickname": "Baronen11 [7d]",
+    "pnl_usdc": 118475,
+    "roi": 0.3382,
+    "money_in_usdc": 350269,
+    "money_out_usdc": 429549,
+    "open_value_usdc": 39195,
+    "silent_days": 0.2,
+    "trades_30d": 426,
+    "trades_total": 426,
+    "history_span_days": 8.7,
+    "typical_buy_usdc": 11,
+    "big_buy_usdc": 1895,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 19,
+    "verdict": "WATCH",
+    "reason": "426 сделок/30д — поток, а не решения"
+  },
+  {
+    "address": "0xc96e5287ab294ac0388c2ddb00180fc464cff1f9",
+    "nickname": "wigglew",
+    "pnl_usdc": 78221,
+    "roi": 0.0328,
+    "money_in_usdc": 2381887,
+    "money_out_usdc": 2379522,
+    "open_value_usdc": 80587,
+    "silent_days": 0.0,
+    "trades_30d": 1056,
+    "trades_total": 4955,
+    "history_span_days": 75.9,
+    "typical_buy_usdc": 36,
+    "big_buy_usdc": 963,
+    "window_days": 90.0,
+    "window_complete": false,
+    "markets_in_window": 363,
+    "verdict": "WATCH",
+    "reason": "1056 сделок/30д — поток, а не решения"
+  },
+  {
+    "address": "0x05f6cb63d4ffdfaecd7ad8acd0765b6f6a5a25a1",
+    "nickname": "ethBELIVER [7d]",
+    "pnl_usdc": 69524,
+    "roi": 0.115,
+    "money_in_usdc": 604723,
+    "money_out_usdc": 508702,
+    "open_value_usdc": 165545,
+    "silent_days": 1.9,
+    "trades_30d": 395,
+    "trades_total": 526,
+    "history_span_days": 60.6,
+    "typical_buy_usdc": 9,
+    "big_buy_usdc": 4447,
+    "window_days": 90.0,
+    "window_complete": true,
+    "markets_in_window": 33,
+    "verdict": "WATCH",
+    "reason": "395 сделок/30д — поток, а не решения"
+  },
+  {
     "address": "0x033f0346c007323030eb420305ffede19a95618e",
     "nickname": "TheVeryGoodCow",
     "pnl_usdc": 39929,
@@ -16,28 +276,8 @@
     "window_days": 90.0,
     "window_complete": false,
     "markets_in_window": 1870,
-    "verdict": "PASS",
-    "reason": "$39,929 при ROI 5.9%, 107 сделок/30д"
-  },
-  {
-    "address": "0xc96e5287ab294ac0388c2ddb00180fc464cff1f9",
-    "nickname": "wigglew",
-    "pnl_usdc": 78555,
-    "roi": 0.0339,
-    "money_in_usdc": 2315718,
-    "money_out_usdc": 2379593,
-    "open_value_usdc": 14681,
-    "silent_days": 0.0,
-    "trades_30d": 1051,
-    "trades_total": 4955,
-    "history_span_days": 75.9,
-    "typical_buy_usdc": 36,
-    "big_buy_usdc": 944,
-    "window_days": 90.0,
-    "window_complete": false,
-    "markets_in_window": 364,
     "verdict": "WATCH",
-    "reason": "1051 сделок/30д — поток, а не решения"
+    "reason": "$39,929 при ROI 5.9%, 107 сделок/30д, но окно 90д не выкачано целиком"
   },
   {
     "address": "0xb652e5dabc3fccd3c939acab0108f99866842db4",
@@ -60,31 +300,76 @@
     "reason": "почти не торгует (0/30д)"
   },
   {
-    "address": "0x5257aa84944804bbb0c718814ebebeeafaca3e2a",
-    "nickname": "NO-GOD-PLEASE-NO",
+    "address": "0x16bb9951a36fce71e2ef57890b786145e0ba8492",
+    "nickname": "SDTrading [30d]",
     "verdict": "WATCH",
-    "silent_days": 1.9,
+    "silent_days": 0.0,
     "pnl_usdc": 0,
-    "trades_30d": 2548,
-    "reason": "~2549 сделок/30д — поток (отсев по первой странице)"
+    "trades_30d": 736,
+    "reason": "~737 сделок/30д — поток (отсев по первой странице)"
   },
   {
-    "address": "0xc41d736bded9ed1accd6a44235039266219774fd",
-    "nickname": "0xC41D736b",
+    "address": "0xc2e7800b5af46e6093872b177b7a5e7f0563be51",
+    "nickname": "beachboy4 [30d,7d,all]",
     "verdict": "WATCH",
-    "silent_days": 0.1,
+    "silent_days": 0.0,
     "pnl_usdc": 0,
-    "trades_30d": 2103,
-    "reason": "~2103 сделок/30д — поток (отсев по первой странице)"
+    "trades_30d": 451,
+    "reason": "~452 сделок/30д — поток (отсев по первой странице)"
+  },
+  {
+    "address": "0xe1000ddb5f5025849765e29d051dfff78f5d4d41",
+    "nickname": "TeGeeLP [30d]",
+    "verdict": "WATCH",
+    "silent_days": 2.0,
+    "pnl_usdc": 0,
+    "trades_30d": 659,
+    "reason": "~659 сделок/30д — поток (отсев по первой странице)"
+  },
+  {
+    "address": "0xee00ba338c59557141789b127927a55f5cc5cea1",
+    "nickname": "S-Works [7d,all]",
+    "verdict": "WATCH",
+    "silent_days": 0.2,
+    "pnl_usdc": 0,
+    "trades_30d": 648,
+    "reason": "~648 сделок/30д — поток (отсев по первой странице)"
+  },
+  {
+    "address": "0x6e9f61710b1703bb7e0ef7ebe1323c443a1d0eae",
+    "nickname": "PetsViljandist [7d]",
+    "verdict": "WATCH",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 1378,
+    "reason": "~1378 сделок/30д — поток (отсев по первой странице)"
+  },
+  {
+    "address": "0x8a8685a792c184e5c2ee8c7d4d4baba7c2c94998",
+    "nickname": "BrotherObama [7d]",
+    "verdict": "WATCH",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 966,
+    "reason": "~966 сделок/30д — поток (отсев по первой странице)"
   },
   {
     "address": "0xe72bb501df5306c75c89383d48a1e81073fbb0a0",
-    "nickname": "norrisfan",
+    "nickname": "norrisfan [7d]",
     "verdict": "WATCH",
     "silent_days": 1.1,
     "pnl_usdc": 0,
-    "trades_30d": 1204,
-    "reason": "~1205 сделок/30д — поток (отсев по первой странице)"
+    "trades_30d": 1201,
+    "reason": "~1202 сделок/30д — поток (отсев по первой странице)"
+  },
+  {
+    "address": "0x006cc834cc092684f1b56626e23bedb3835c16ea",
+    "nickname": "0x006cc834Cc092684F1B56626E23BEdB3835c16ea-1729683673397 [all]",
+    "verdict": "WATCH",
+    "silent_days": 43.7,
+    "pnl_usdc": 0,
+    "trades_30d": 1117,
+    "reason": "~1117 сделок/30д — поток (отсев по первой странице)"
   },
   {
     "address": "0xa6d9b55a6a3a54a9d50ca94c64f00af69c50fd2f",
@@ -96,12 +381,863 @@
     "reason": "~667 сделок/30д — поток (отсев по первой странице)"
   },
   {
+    "address": "0xcd30f4698c6f5f3829893e68e183a8e5ea18f316",
+    "nickname": "SPCEXBUYER [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 2.3,
+    "pnl_usdc": 0,
+    "trades_30d": 16558,
+    "reason": "~16558 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xe30e74595517de48f1fb19f4553dd3d9f1e96b87",
+    "nickname": "0xE30E74595517de48f1FB19f4553dd3d9F1E96B87-1772612985000 [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 4.7,
+    "pnl_usdc": 0,
+    "trades_30d": 1891,
+    "reason": "~1891 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x34dd4a4b70eaf79a17878f7938263c801d4dfd83",
+    "nickname": "vito3corleone [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 2511,
+    "reason": "~2511 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x4bff30af91642dc7d2b19a8664378fe55c45fc26",
+    "nickname": "Sassy-Bucket [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 4056,
+    "reason": "~4056 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x5268527977f700f9bf9b6d5cd843859e4e70135d",
+    "nickname": "HomeRunHazard [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 71761,
+    "reason": "~71761 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xc9a24fa249cf907c598544a4d46c077c1edf77d3",
+    "nickname": "0x7A3f9C2D8b41E6a570F2c93B1d4E8A [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.9,
+    "pnl_usdc": 0,
+    "trades_30d": 42558,
+    "reason": "~42558 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x204f72f35326db932158cba6adff0b9a1da95e14",
+    "nickname": "swisstony [30d,7d,all]",
+    "verdict": "DROP",
+    "reason": "ни одной сделки в истории"
+  },
+  {
+    "address": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",
+    "nickname": "RN1 [30d,7d,all]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 141000,
+    "reason": "~141000 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xdc41c39b95453c943174f369926018f6963bdd7e",
+    "nickname": "nigiri99 [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 143700,
+    "reason": "~143700 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x1465b79bff7992bc703e1aafb3683b1089647072",
+    "nickname": "JnStrtPrdctnMrkts [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 3023,
+    "reason": "~3023 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xf201a19b43471261a3c1ba9247335d55270e527e",
+    "nickname": "0xF201A19b43471261A3c1Ba9247335d55270e527e-1763824114616 [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 68494,
+    "reason": "~68494 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x4f1d5ae26fc31472966e951af3183308736d8de2",
+    "nickname": "e46m3 [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 41031,
+    "reason": "~41031 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xe40aaa5ce1dac0b7dc24c9d0284f27e17c3fe4a2",
+    "nickname": "Mysaria [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": -0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 59700,
+    "reason": "~59700 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x13fa4ce1b8a27dd0b7a72db6205a50ee6ff0954c",
+    "nickname": "betterfasterstronger [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 146400,
+    "reason": "~146400 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x03805a13a0b3e058f55f6c6af95389d4f431073d",
+    "nickname": "donthackme [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 57227,
+    "reason": "~57228 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xd570e634aeb745d6501566dba5f81a555cc7e4f8",
+    "nickname": "0xd9670ea74384c1e1b9dc1e4267ffadaf4cdd140 [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 72475,
+    "reason": "~72475 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x65c18d740c8246af3353741c0b32e4b6da552988",
+    "nickname": "casualbet2020 [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 4206,
+    "reason": "~4207 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x29b52d98ac9ef9414b04164246c95bc63d74cc6c",
+    "nickname": "0x29b52d98ac9ef9414b04164246c95BC63d7 [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 18326,
+    "reason": "~18327 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xb0c85813a7a4428f1139ff91d3118a92c391fe7f",
+    "nickname": "test-account3 [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 117900,
+    "reason": "~117900 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xf705fa045201391d9632b7f3cde06a5e24453ca7",
+    "nickname": "0xf705fa04 [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 5989,
+    "reason": "~5989 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x6e2c0e9474af7d720e5aba2a5b0bb6f723b7787c",
+    "nickname": "0x99a093771ad58bcfc3023cd75566415f [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 143400,
+    "reason": "~143400 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x8546a601f7c7cc3dae7141f20b0e09e42bbf35b8",
+    "nickname": "OOOwhyOOO [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.1,
+    "pnl_usdc": 0,
+    "trades_30d": 3784,
+    "reason": "~3784 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xfe787d2da716d60e8acff57fb87eb13cd4d10319",
+    "nickname": "ferrariChampions2026 [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 127800,
+    "reason": "~127800 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x2c335066fe58fe9237c3d3dc7b275c2a034a0563",
+    "nickname": "0x2c335066FE58fe9237c3d3Dc7b275C2a034a0563-1759935795465 [30d,7d,all]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 99566,
+    "reason": "~99566 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xfbd8c9c22ca76b3662d0e53a4f79719fdc684027",
+    "nickname": "0xfBd8C9C22cA76B3662d0e53A4f79719FDC684027-1779347618060 [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 52174,
+    "reason": "~52174 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xab51c55eb5cefec49c52a174acc10b3cd69e2473",
+    "nickname": "Longdemshiuchiha [30d]",
+    "verdict": "DROP",
+    "silent_days": 5.8,
+    "pnl_usdc": 0,
+    "trades_30d": 2538,
+    "reason": "~2539 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x5a218c7ad04135830a45c41aaed7294df7809318",
+    "nickname": "balthazar [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 69929,
+    "reason": "~69930 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x1b20a00709dfe648afd26b326394b5e031f83ab0",
+    "nickname": "0x1b20a00709DfE648AFd26b326394b5e031f83ab0-1785189457930 [30d]",
+    "verdict": "DROP",
+    "silent_days": 20.6,
+    "pnl_usdc": 0,
+    "trades_30d": 1964,
+    "reason": "~1964 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xf23c5bc7b547867eb6532920144562718aa49f81",
+    "nickname": "DoNotTailMe [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.1,
+    "pnl_usdc": 0,
+    "trades_30d": 4851,
+    "reason": "~4852 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xf5f92940519a72da460b1c2a606bc1230f0e87b0",
+    "nickname": "kekasaur [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.6,
+    "pnl_usdc": 0,
+    "trades_30d": 149400,
+    "reason": "~149400 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x04d5524a0a5af2eca6e39e03defc261d42fe66d8",
+    "nickname": "WTSA [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.7,
+    "pnl_usdc": 0,
+    "trades_30d": 149400,
+    "reason": "~149400 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x20b80ebb96e2051540e1d475e4ce122fc282aa04",
+    "nickname": "tes21sa [30d,7d]",
+    "verdict": "DROP",
+    "silent_days": 0.8,
+    "pnl_usdc": 0,
+    "trades_30d": 2081,
+    "reason": "~2081 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xb55fa1296e6ec55d0ce53d93b9237389f11764d4",
+    "nickname": "0xb55fa1296E6ec55D0cE53d93B9237389f11764d4-1777575277609 [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 145500,
+    "reason": "~145500 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x01e6e3c5cfe50943e7721398054cb1e22032e7e0",
+    "nickname": "JustADonk [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 2085,
+    "reason": "~2086 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x10ef48324b3ebc06d9137794c70285e8e37a7d7b",
+    "nickname": "Future-Tarot-Trader [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 16145,
+    "reason": "~16146 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x1f7105a18d9f36aef7c83e5df210e57cf487b2e4",
+    "nickname": "00xaaxaxaxsasdasddasdjj233j2j32h4h35 [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.6,
+    "pnl_usdc": 0,
+    "trades_30d": 4605,
+    "reason": "~4606 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x31864feb9d25dee93728c6225ba891530967e9ca",
+    "nickname": "johnbaster [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 16939,
+    "reason": "~16939 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xd3b034d7bfb2473fb252d0414646d9786bac329e",
+    "nickname": "Sunshine.Smile [30d]",
+    "verdict": "DROP",
+    "silent_days": -0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 7594,
+    "reason": "~7594 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xa71093cafc0c099b4ccab24c3cb8018d817923c4",
+    "nickname": "Talvez10 [30d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 7247,
+    "reason": "~7247 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x85f031d069de300055900c4055c1baeb6bde3f67",
+    "nickname": "RJW1 [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 3186,
+    "reason": "~3186 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xdb859a551fcf56e49416160911476bea7307152f",
+    "nickname": "AV23IUa [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 8559,
+    "reason": "~8560 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x3a8aa345d5db7ec5138298c8c4f4540259be7699",
+    "nickname": "TheReturnOfDarthMaul [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 5083,
+    "reason": "~5084 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xfea31bc088000ff909be1dfd8d0e3f2c7ef2d227",
+    "nickname": "ndb1 [7d,all]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 2162,
+    "reason": "~2162 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x336bf6f91a4619d54f0711a20fe468adf4d71233",
+    "nickname": "ArturitoFilito [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 3606,
+    "reason": "~3606 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x0346afae2603313d2bbee96b628536c8cbe352a5",
+    "nickname": "GoalLineGhost [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 143100,
+    "reason": "~143100 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xc8075693f48668a264b9fa313b47f52712fcc12b",
+    "nickname": "texaskid [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 2504,
+    "reason": "~2504 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x2a69660046d7acc4ab204d7cc5ba78b0776cd2f7",
+    "nickname": "UpTheBlues [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 144600,
+    "reason": "~144600 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x7d92fd69504bfd391162e1442cb784c0af408676",
+    "nickname": "mikesports [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 2954,
+    "reason": "~2955 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xa4fd70a8d79c3433ca2eb967ee605a356986748b",
+    "nickname": "alexdave888 [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.2,
+    "pnl_usdc": 0,
+    "trades_30d": 17861,
+    "reason": "~17861 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x1b47e9b128e6b671edebfb2cac23dd3efc40d814",
+    "nickname": "sbsigner [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 44365,
+    "reason": "~44365 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x032eb1bc893940263ad0b01889f262fc232f2a9e",
+    "nickname": "purplegatto [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 18927,
+    "reason": "~18928 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x9703676286b93c2eca71ca96e8757104519a69c2",
+    "nickname": "AnonymousUsername [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 64061,
+    "reason": "~64062 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x9f15613ebf1f36d4bc679e1211d1fc567cf9bdb3",
+    "nickname": "0x9f15613ebf1f36d4bc679e1211d1fc567cf9bdb3 [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 8806,
+    "reason": "~8806 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xc8ab97a9089a9ff7e6ef0688e6e591a066946418",
+    "nickname": "ArmageddonRewardsBilly [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 60809,
+    "reason": "~60810 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x6f3e7f25baa7d2d49e15e2d2957ff3dec62cbcf8",
+    "nickname": "fRibrenlc [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 2860,
+    "reason": "~2861 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x73bcd24d510ff4e4d5feac6aec763c5511e246ce",
+    "nickname": "0x73bcd24d510Ff4e4D5FEac6aec763C5511E246CE-1767607363396 [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 7220,
+    "reason": "~7220 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0xcf6c5492124794394dd9eac46498a8babbe47e66",
+    "nickname": "one8tyfive [7d]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 3771,
+    "reason": "~3771 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x56687bf447db6ffa42ffe2204a05edaa20f55839",
+    "nickname": "Theo4 [all]",
+    "verdict": "DROP",
+    "silent_days": 655.3,
+    "pnl_usdc": 0,
+    "reason": "молчит 655 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x1f2dd6d473f3e824cd2f8a89d9c69fb96f6ad0cf",
+    "nickname": "Fredi9999 [all]",
+    "verdict": "DROP",
+    "silent_days": 675.4,
+    "pnl_usdc": 0,
+    "reason": "молчит 675 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x6a72f61820b26b1fe4d956e17b6dc2a1ea3033ee",
+    "nickname": "kch123 [all]",
+    "verdict": "DROP",
+    "silent_days": 61.8,
+    "pnl_usdc": 0,
+    "reason": "молчит 62 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x96cfcb0c30942cfcd1cdf76c7d408794d66b1acb",
+    "nickname": "mintblade [all]",
+    "verdict": "DROP",
+    "silent_days": 75.6,
+    "pnl_usdc": 0,
+    "reason": "молчит 76 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xed64a7bf029040aa331abc87902434d815ef217d",
+    "nickname": "fishalive [all]",
+    "verdict": "DROP",
+    "silent_days": 76.0,
+    "pnl_usdc": 0,
+    "reason": "молчит 76 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xbc11a64ab34a03a043fbe80598fa065ee87eeec6",
+    "nickname": "frostrizz [all]",
+    "verdict": "DROP",
+    "silent_days": 71.5,
+    "pnl_usdc": 0,
+    "reason": "молчит 72 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x78b9ac44a6d7d7a076c14e0ad518b301b63c6b76",
+    "nickname": "Len9311238 [all]",
+    "verdict": "DROP",
+    "silent_days": 662.5,
+    "pnl_usdc": 0,
+    "reason": "молчит 663 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x664ce9fb97ae1bbd538d7381b2f4e92dab16f49c",
+    "nickname": "sparklingwater123 [all]",
+    "verdict": "DROP",
+    "silent_days": 65.7,
+    "pnl_usdc": 0,
+    "reason": "молчит 66 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x09b428f7c2b469786286214aa5c90dd9015f7320",
+    "nickname": "DEEDDIT [all]",
+    "verdict": "DROP",
+    "silent_days": 46.8,
+    "pnl_usdc": 0,
+    "reason": "молчит 47 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xd235973291b2b75ff4070e9c0b01728c520b0f29",
+    "nickname": "zxgngl [all]",
+    "verdict": "DROP",
+    "silent_days": 652.4,
+    "pnl_usdc": 0,
+    "reason": "молчит 652 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x3f87d51f27ba6e19ec52aaeebb68559a839c742c",
+    "nickname": "GRIMDRIP [all]",
+    "verdict": "DROP",
+    "silent_days": 73.0,
+    "pnl_usdc": 0,
+    "reason": "молчит 73 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x863134d00841b2e200492805a01e1e2f5defaa53",
+    "nickname": "RepTrump [all]",
+    "verdict": "DROP",
+    "silent_days": 675.4,
+    "pnl_usdc": 0,
+    "reason": "молчит 675 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x5e4c3b5b81171e2ca4ab776ac0d6bba787f9dba2",
+    "nickname": "endlessFate [all]",
+    "verdict": "DROP",
+    "silent_days": 73.6,
+    "pnl_usdc": 0,
+    "reason": "молчит 74 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x8119010a6e589062aa03583bb3f39ca632d9f887",
+    "nickname": "PrincessCaro [all]",
+    "verdict": "DROP",
+    "silent_days": 680.8,
+    "pnl_usdc": 0,
+    "reason": "молчит 681 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xe9ad918c7678cd38b12603a762e638a5d1ee7091",
+    "nickname": "walletmobile [all]",
+    "verdict": "DROP",
+    "silent_days": 662.1,
+    "pnl_usdc": 0,
+    "reason": "молчит 662 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x94f199fb7789f1aef7fff6b758d6b375100f4c7a",
+    "nickname": "KeyTransporter [all]",
+    "verdict": "DROP",
+    "silent_days": 189.0,
+    "pnl_usdc": 0,
+    "reason": "молчит 189 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x885783760858e1bd5dd09a3c3f916cfa251ac270",
+    "nickname": "BetTom42 [all]",
+    "verdict": "DROP",
+    "silent_days": 662.7,
+    "pnl_usdc": 0,
+    "reason": "молчит 663 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x23786fdad0073692157c6d7dc81f281843a35fcb",
+    "nickname": "mikatrade77 [all]",
+    "verdict": "DROP",
+    "silent_days": 662.5,
+    "pnl_usdc": 0,
+    "reason": "молчит 663 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xe90bec87d9ef430f27f9dcfe72c34b76967d5da2",
+    "nickname": "gmanas [all]",
+    "verdict": "DROP",
+    "silent_days": 180.9,
+    "pnl_usdc": 0,
+    "reason": "молчит 181 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xd0c042c08f755ff940249f62745e82d356345565",
+    "nickname": "alexmulti [all]",
+    "verdict": "DROP",
+    "silent_days": 666.9,
+    "pnl_usdc": 0,
+    "reason": "молчит 667 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xdc876e6873772d38716fda7f2452a78d426d7ab6",
+    "nickname": "432614799197 [all]",
+    "verdict": "DROP",
+    "silent_days": 173.9,
+    "pnl_usdc": 0,
+    "reason": "молчит 174 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x507e52ef684ca2dd91f90a9d26d149dd3288beae",
+    "nickname": "GamblingIsAllYouNeed [all]",
+    "verdict": "DROP",
+    "silent_days": 45.9,
+    "pnl_usdc": 0,
+    "reason": "молчит 46 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xe549581668a5751c1972d3ad2d1991d900bd2d54",
+    "nickname": "Allezpapa [all]",
+    "verdict": "DROP",
+    "silent_days": 41.9,
+    "pnl_usdc": 0,
+    "trades_30d": 1711,
+    "reason": "~1712 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x2a2c53bd278c04da9962fcf96490e17f3dfb9bc1",
+    "nickname": "0x2a2C53bD278c04DA9962Fcf96490E17F3DfB9Bc1-1772479215461 [all]",
+    "verdict": "DROP",
+    "silent_days": 79.9,
+    "pnl_usdc": 0,
+    "reason": "молчит 80 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xdb27bf2ac5d428a9c63dbc914611036855a6c56e",
+    "nickname": "DrPufferfish [all]",
+    "verdict": "DROP",
+    "silent_days": 109.9,
+    "pnl_usdc": 0,
+    "reason": "молчит 110 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x16f91db2592924cfed6e03b7e5cb5bb1e32299e3",
+    "nickname": "Jenzigo [all]",
+    "verdict": "DROP",
+    "silent_days": 667.0,
+    "pnl_usdc": 0,
+    "reason": "молчит 667 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xefbc5fec8d7b0acdc8911bdd9a98d6964308f9a2",
+    "nickname": "reachingthesky [all]",
+    "verdict": "DROP",
+    "silent_days": 164.8,
+    "pnl_usdc": 0,
+    "reason": "молчит 165 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x019782cab5d844f02bafb71f512758be78579f3c",
+    "nickname": "majorexploiter [all]",
+    "verdict": "DROP",
+    "silent_days": 182.0,
+    "pnl_usdc": 0,
+    "reason": "молчит 182 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x076daa87c4fe1a85402a9b6b8e0a866224388d4c",
+    "nickname": "0x076daa87 [all]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 60126,
+    "reason": "~60126 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x16b29c50f2439faf627209b2ac0c7bbddaa8a881",
+    "nickname": "SeriouslySirius [all]",
+    "verdict": "DROP",
+    "silent_days": 235.0,
+    "pnl_usdc": 0,
+    "reason": "молчит 235 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xee613b3fc183ee44f9da9c05f53e2da107e3debf",
+    "nickname": "sovereign2013 [all]",
+    "verdict": "DROP",
+    "silent_days": 128.1,
+    "pnl_usdc": 0,
+    "reason": "молчит 128 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x5966db1fe50763c9e3c014d756369bad07e1f804",
+    "nickname": "0x5966Db1fE50763C9e3C014d756369BAd07E1F804-1777648534241 [all]",
+    "verdict": "DROP",
+    "silent_days": 51.7,
+    "pnl_usdc": 0,
+    "reason": "молчит 52 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x476e1322d1a412fa0325527b8c3bc5e707b1396d",
+    "nickname": "asparagus2012 [all]",
+    "verdict": "DROP",
+    "silent_days": 46.0,
+    "pnl_usdc": 0,
+    "reason": "молчит 46 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x14964aefa2cd7caff7878b3820a690a03c5aa429",
+    "nickname": "gmpm [all]",
+    "verdict": "DROP",
+    "silent_days": 101.8,
+    "pnl_usdc": 0,
+    "reason": "молчит 102 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x94a428cfa4f84b264e01f70d93d02bc96cb36356",
+    "nickname": "GCottrell93 [all]",
+    "verdict": "DROP",
+    "silent_days": 74.7,
+    "pnl_usdc": 0,
+    "reason": "молчит 75 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x9d84ce0306f8551e02efef1680475fc0f1dc1344",
+    "nickname": "ImJustKen [all]",
+    "verdict": "DROP",
+    "silent_days": 0.0,
+    "pnl_usdc": 0,
+    "trades_30d": 4091,
+    "reason": "~4091 сделок/30д — робот, не информация"
+  },
+  {
+    "address": "0x033a07b3de5947eab4306676ad74eb546da30d50",
+    "nickname": "RandomGenius-190 [all]",
+    "verdict": "DROP",
+    "silent_days": 662.8,
+    "pnl_usdc": 0,
+    "reason": "молчит 663 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xed2239a9150c3920000d0094d28fa51c7db03dd0",
+    "nickname": "Michie [all]",
+    "verdict": "DROP",
+    "silent_days": 681.9,
+    "pnl_usdc": 0,
+    "reason": "молчит 682 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x17db3fcd93ba12d38382a0cade24b200185c5f6d",
+    "nickname": "fengdubiying [all]",
+    "verdict": "DROP",
+    "silent_days": 47.0,
+    "pnl_usdc": 0,
+    "reason": "молчит 47 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x36a3f17401e395ef4cb1b7f42bcdb8ab8e15fafb",
+    "nickname": "gfjoigfsjoigsjoi [all]",
+    "verdict": "DROP",
+    "silent_days": 127.1,
+    "pnl_usdc": 0,
+    "reason": "молчит 127 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0x5257aa84944804bbb0c718814ebebeeafaca3e2a",
+    "nickname": "NO-GOD-PLEASE-NO",
+    "verdict": "DROP",
+    "silent_days": 1.9,
+    "pnl_usdc": 0,
+    "trades_30d": 2548,
+    "reason": "~2549 сделок/30д — робот, не информация"
+  },
+  {
     "address": "0x3de4543d599ffb09386aac2eab198a295511b032",
     "nickname": "248188374",
     "verdict": "DROP",
     "silent_days": 111.7,
     "pnl_usdc": 0,
     "reason": "молчит 112 дн (отсев по первой странице)"
+  },
+  {
+    "address": "0xc41d736bded9ed1accd6a44235039266219774fd",
+    "nickname": "0xC41D736b",
+    "verdict": "DROP",
+    "silent_days": 0.1,
+    "pnl_usdc": 0,
+    "trades_30d": 2103,
+    "reason": "~2103 сделок/30д — робот, не информация"
   },
   {
     "address": "0x9495425feeb0c250accb89275c97587011b19a27",
@@ -115,7 +1251,7 @@
     "address": "0x75d4c19708ad084c1cf6a10cfdf528c76fd94027",
     "nickname": "maduroisq",
     "verdict": "DROP",
-    "silent_days": 86.0,
+    "silent_days": 86.1,
     "pnl_usdc": 0,
     "reason": "молчит 86 дн (отсев по первой странице)"
   },
@@ -123,7 +1259,7 @@
     "address": "0x03bac23a9d3285eb748b3fabd4c9653d11fda1ef",
     "nickname": "KairosHunter",
     "verdict": "DROP",
-    "silent_days": 118.1,
+    "silent_days": 118.2,
     "pnl_usdc": 0,
     "reason": "молчит 118 дн (отсев по первой странице)"
   },
@@ -194,5 +1330,25 @@
     "markets_in_window": 109,
     "verdict": "DROP",
     "reason": "PnL $-236,744 — теряет деньги"
+  },
+  {
+    "address": "0xc3acf5878a03523d09a3ac859943445d7baeb964",
+    "nickname": "mentionmarket [30d,7d]",
+    "pnl_usdc": -693747,
+    "roi": -0.1829,
+    "money_in_usdc": 3792110,
+    "money_out_usdc": 3098363,
+    "open_value_usdc": 0,
+    "silent_days": 0.5,
+    "trades_30d": 23,
+    "trades_total": 5436,
+    "history_span_days": 44.4,
+    "typical_buy_usdc": 9,
+    "big_buy_usdc": 201,
+    "window_days": 90.0,
+    "window_complete": false,
+    "markets_in_window": 31,
+    "verdict": "DROP",
+    "reason": "PnL $-693,747 — теряет деньги"
   }
 ]

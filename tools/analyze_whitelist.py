@@ -107,6 +107,10 @@ MAX_SILENT_DAYS = 45.0      # дольше молчит — копировать
 MIN_PNL_USDC = 5_000.0      # ниже — не отличить от шума
 MIN_ROI = 0.03              # 3% на вложенный доллар
 MAX_TRADES_30D = 150        # выше — поток, а не решения; копировать бессмысленно
+# Выше этого — торговый робот (в выборке попадались адреса со 140 000 сделок
+# в месяц, то есть по три в минуту круглосуточно). Их сделки не несут
+# информации ни как сигнал, ни как признак: в списке им не место совсем.
+BOT_TRADES_30D = 1_500
 MIN_TRADES_30D = 3          # ниже — сигналов от него всё равно не будет
 
 
@@ -197,6 +201,11 @@ def screen(address: str, nickname: str, now: float) -> dict:
     span_days = (last_ts - min(a["timestamp"] for a in acts)) / 86400.0
     if len(acts) >= PAGE and span_days > 0:
         est_30d = len(trades) * (30.0 / max(span_days, 0.1))
+        if est_30d > BOT_TRADES_30D:
+            return {"address": address, "nickname": nickname, "verdict": "DROP",
+                    "silent_days": round(silent_days, 1), "pnl_usdc": 0,
+                    "trades_30d": int(est_30d),
+                    "reason": f"~{est_30d:.0f} сделок/30д — робот, не информация"}
         if est_30d > MAX_TRADES_30D * 3:
             return {"address": address, "nickname": nickname, "verdict": "WATCH",
                     "silent_days": round(silent_days, 1), "pnl_usdc": 0,
@@ -268,6 +277,9 @@ def analyze(address: str, nickname: str, max_pages: int, now: float,
         res.update(verdict="DROP", reason=f"молчит {silent_days:.0f} дн")
     elif pnl <= 0:
         res.update(verdict="DROP", reason=f"PnL ${pnl:,.0f} — теряет деньги")
+    elif trades_30d > BOT_TRADES_30D:
+        res.update(verdict="DROP",
+                   reason=f"{trades_30d} сделок/30д — робот, не информация")
     elif trades_30d > MAX_TRADES_30D:
         res.update(verdict="WATCH",
                    reason=f"{trades_30d} сделок/30д — поток, а не решения")
