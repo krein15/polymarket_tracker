@@ -211,6 +211,7 @@ class PolymarketTracker:
             side=trade.side,
             usdc_amount=trade.usdc_amount,
             price=trade.price,
+            condition_id=trade.condition_id or "",
         )
         if not saved:
             return  # уже видели

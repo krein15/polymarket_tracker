@@ -30,6 +30,8 @@
 
 Штрафы:
 
+    hedge           -60  кошелёк купил ОБА исхода рынка (YES и NO): ставка
+                         на оба результата мнения не выражает
     market_maker    -40  кошелёк торговал обе стороны этого рынка: это
                          маркет-мейкер или арбитражник, а не инсайдер.
                          Фактически дисквалификация.
@@ -97,6 +99,9 @@ WHITELIST_PASS_POINTS = 30
 WHITELIST_WATCH_POINTS = 15
 
 MARKET_MAKER_PENALTY = -40
+# Покупка обоих исходов — не ставка на результат, а хедж или арбитраж.
+# Штраф жёстче, чем у скальпинга: тут сделка вообще не несёт мнения.
+HEDGE_PENALTY = -60
 NEAR_RESOLVED_PENALTY = -25
 
 # Базовый часовой оборот считаем по локальной истории за неделю, но только
@@ -122,7 +127,8 @@ class Features:
     is_market_maker: bool
     price: float
     volume_24h: float
-    whitelist_tier: str = ""  # "pass" | "watch" | "" — уровень в whitelist
+    whitelist_tier: str = ""
+    is_hedged: bool = False  # купил ОБА исхода рынка — мнения о результате нет  # "pass" | "watch" | "" — уровень в whitelist
 
 
 @dataclass
@@ -243,6 +249,9 @@ class FeatureExtractor:
             is_market_maker=self.storage.wallet_traded_both_sides(
                 trade.maker, trade.token_id
             ),
+            is_hedged=self.storage.wallet_bought_both_outcomes(
+                trade.maker, trade.condition_id or "", acc_since
+            ),
             price=trade.price,
             volume_24h=market.volume_24h,
         )
@@ -315,6 +324,10 @@ def compute_score(features: Features, config: "Config") -> Score:
     if 0 < f.volume_24h < config.max_market_volume_24h:
         parts["illiquid_market"] = ILLIQUID_POINTS
         notes.append(f"неликвидный рынок (vol24h ${f.volume_24h:,.0f})")
+
+    if f.is_hedged:
+        parts["hedge"] = HEDGE_PENALTY
+        notes.append("купил оба исхода рынка — это хедж, а не мнение")
 
     if f.is_market_maker:
         parts["market_maker"] = MARKET_MAKER_PENALTY

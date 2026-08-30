@@ -1,0 +1,19 @@
+# Whitelist Polymarket трейдеров — по одному адресу в строке
+# Строки с # и пустые игнорируются
+# Можно редактировать на лету — перечитывается при каждой сделке
+
+0xb652e5dabc3fccd3c939acab0108f99866842db4  # 0x2a2C53b | PASS 100% ROI+$527k | 2026-05-05
+0x033f0346c007323030eb420305ffede19a95618e  # TheVeryGoodCow | PASS 100% ROI+$132k | 2026-05-05
+0x5257aa84944804bbb0c718814ebebeeafaca3e2a  # NO-GOD-PLEASE-NO | PASS 100% ROI+$398k | 2026-05-05
+0x3de4543d599ffb09386aac2eab198a295511b032  # 248188374 | PASS 100% ROI+$530k | 2026-05-05
+0xc96e5287ab294ac0388c2ddb00180fc464cff1f9  # wigglew | PASS 100% ROI+$161k | 2026-05-05
+0xc41d736bded9ed1accd6a44235039266219774fd  # 0xC41D736b | PASS 100% ROI+$257k | 2026-05-05
+0x37e4728b3c4607fb2b3b205386bb1d1fb1a8c991  # SemyonMarmeladov | PASS 100% ROI+$222k | 2026-05-05
+0x9495425feeb0c250accb89275c97587011b19a27  # LaBradfordSmith22 | PASS 100% ROI+$685k | 2026-05-05
+0xefddbb135e2cc2648e3ca6a6b3d4fa4994d5017f  # maxgreen | PASS 100% ROI+$32k | 2026-05-05
+0xe72bb501df5306c75c89383d48a1e81073fbb0a0  # norrisfan | PASS 92.9% ROI+$102k | 2026-05-05
+0x384fdc42f4f9cdee6b311c5d0dba6f81eb4658ad  # Political-Predator | PASS 85.7% ROI+$77k | 2026-05-05
+0xa6d9b55a6a3a54a9d50ca94c64f00af69c50fd2f  # Amrosein | WATCH 100% ROI-$7k | 2026-05-05
+0x75d4c19708ad084c1cf6a10cfdf528c76fd94027  # maduroisq | WATCH 91.7% ROI-$24k | 2026-05-05
+0x03bac23a9d3285eb748b3fabd4c9653d11fda1ef  # KairosHunter | WATCH 90% ROI-$12k | 2026-05-05
+0xcddfe6ceef57bbb2afcb68db611e4ffe26b81b3f  # krimut | WATCH 80% ROI-$7.6k | 2026-05-05

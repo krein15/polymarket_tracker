@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS trades (
     block_number INTEGER NOT NULL DEFAULT 0,
     maker TEXT NOT NULL,
     token_id TEXT NOT NULL,
+    -- Рынок целиком. token_id — это ОДИН исход (YES либо NO), а хедж
+    -- распознаётся только по общему conditionId обоих исходов.
+    condition_id TEXT,
     side TEXT NOT NULL,
     usdc_amount REAL NOT NULL,
     price REAL NOT NULL,
@@ -200,12 +203,21 @@ class Storage:
                 # а не только для сигнальных: без этого не подобрать порог.
                 "ALTER TABLE shadow_trades ADD COLUMN score REAL",
                 "ALTER TABLE shadow_trades ADD COLUMN score_parts TEXT",
+                # Хедж (покупка обоих исходов) без conditionId не ловится.
+                "ALTER TABLE trades ADD COLUMN condition_id TEXT",
             ):
                 try:
                     c.execute(ddl)
                 except sqlite3.OperationalError as e:
                     if "duplicate column" not in str(e).lower():
                         raise
+            # Индексы по добавленным колонкам — строго ПОСЛЕ ALTER: на уже
+            # существующей БД колонки в момент CREATE TABLE ещё нет, и
+            # CREATE INDEX по ней падает с "no such column".
+            c.execute(
+                "CREATE INDEX IF NOT EXISTS idx_trades_maker_cond "
+                "ON trades(maker, condition_id, ts)"
+            )
         # Схема должна лечь на диск сразу, а не ждать пачку.
         self.flush()
 
@@ -330,21 +342,25 @@ class Storage:
         side: str,
         usdc_amount: float,
         price: float,
+        condition_id: str = "",
     ) -> bool:
         """Возвращает True если сохранено (не дубликат).
 
         log_index и block_number сохраняем для совместимости со схемой;
-        при работе через Data API оба = 0.
+        при работе через Data API оба = 0. condition_id нужен, чтобы видеть
+        покупку обоих исходов одного рынка (хедж).
         """
         with self._conn() as c:
             try:
                 c.execute(
                     """
                     INSERT INTO trades
-                    (tx_hash, log_index, ts, block_number, maker, token_id, side, usdc_amount, price)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (tx_hash, log_index, ts, block_number, maker, token_id,
+                     condition_id, side, usdc_amount, price)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (tx_hash, log_index, ts, block_number, maker.lower(), token_id, side, usdc_amount, price),
+                    (tx_hash, log_index, ts, block_number, maker.lower(), token_id,
+                     condition_id or None, side, usdc_amount, price),
                 )
                 return True
             except sqlite3.IntegrityError:
@@ -468,11 +484,35 @@ class Storage:
             ).fetchone()
             return int(row["n"] or 0)
 
-    def wallet_traded_both_sides(self, maker: str, token_id: str) -> bool:
-        """Торговал ли кошелёк обе стороны этого рынка.
+    def wallet_bought_both_outcomes(
+        self, maker: str, condition_id: str, since_ts: int
+    ) -> bool:
+        """Покупал ли кошелёк ОБА исхода одного рынка (YES и NO) за окно.
 
-        Признак маркет-мейкера или арбитражника: на пустой БД такой адрес
-        выглядит "новым" и тянет ложные сигналы.
+        Это и есть хедж или арбитраж: ставка на оба исхода не несёт мнения о
+        результате, копировать её бессмысленно. Ловится только по
+        condition_id — у YES и NO разные token_id, и по токену такую пару
+        не увидеть.
+
+        Пустой condition_id (старые записи до миграции) — False: судить не
+        по чему, а ложное срабатывание хуже пропуска.
+        """
+        if not condition_id:
+            return False
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COUNT(DISTINCT token_id) AS n FROM trades "
+                "WHERE maker = ? AND condition_id = ? AND side = 'buy' AND ts >= ?",
+                (maker.lower(), condition_id, since_ts),
+            ).fetchone()
+            return int(row["n"] or 0) > 1
+
+    def wallet_traded_both_sides(self, maker: str, token_id: str) -> bool:
+        """Покупал И продавал один и тот же токен — то есть входил и выходил.
+
+        ВНИМАНИЕ: это НЕ про ставку на оба исхода рынка — для неё есть
+        wallet_bought_both_outcomes. Здесь про оборот по одному исходу:
+        признак скальпера или маркет-мейкера.
         """
         with self._conn() as c:
             row = c.execute(

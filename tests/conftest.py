@@ -58,8 +58,10 @@ def make_trade(
     token_id: str = "token-1",
     ts: int = NOW,
     tx_hash: str = "0xabc",
+    condition_id: str = "",
 ) -> Trade:
     return Trade(
+        condition_id=condition_id,
         tx_hash=tx_hash,
         log_index=0,
         block_number=0,
