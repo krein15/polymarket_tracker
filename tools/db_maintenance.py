@@ -38,6 +38,18 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
+
+# Windows-консоль работает в cp866/cp1251 и не знает части символов (стрелки,
+# галочки). Пока вывод идёт в консоль, Python печатает их через WriteConsoleW,
+# но при ПЕРЕНАПРАВЛЕНИИ (> log.txt, Планировщик задач) переключается на
+# кодировку локали и падает с UnicodeEncodeError. Заменяем непечатаемое на "?".
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):  # не TextIOWrapper — не наша забота
+        pass
+
 
 # Пути по умолчанию — от КОРНЯ проекта (скрипт лежит в tools/).
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,7 +68,43 @@ def _human_size(num_bytes: int) -> str:
     return f"{val:.1f} ТБ"
 
 
-def cmd_backup(db_path: Path, backup_dir: Path, keep: int) -> int:
+def _drop_trades(path: Path) -> None:
+    """Выбросить из копии таблицу trades и сжать файл.
+
+    trades — 95% размера базы и при этом сырьё: её всё равно чистит retention,
+    восстанавливать неоткуда и незачем. Ценное (signals, signal_outcomes,
+    shadow_trades, wallets, checkpoint) весит единицы мегабайт и помещается
+    в бесплатный тариф облака.
+    """
+    conn = sqlite3.connect(str(path), timeout=30.0, isolation_level=None)
+    try:
+        conn.execute("DELETE FROM trades")
+        conn.execute("VACUUM")
+    finally:
+        conn.close()
+
+
+def _fresh_backup_exists(backup_dir: Path, prefix: str, max_age_hours: float) -> Optional[Path]:
+    """Свежий бэкап моложе max_age_hours, если он есть."""
+    if max_age_hours <= 0:
+        return None
+    cutoff = time.time() - max_age_hours * 3600
+    for path in sorted(backup_dir.glob(f"{prefix}*.db"), reverse=True):
+        try:
+            if path.stat().st_mtime >= cutoff:
+                return path
+        except OSError:
+            continue
+    return None
+
+
+def cmd_backup(
+    db_path: Path,
+    backup_dir: Path,
+    keep: int,
+    light: bool = False,
+    min_interval_hours: float = 0.0,
+) -> int:
     """Снять онлайн-бэкап БД и проредить старые. Возвращает 0 при успехе."""
     if not db_path.exists():
         print(f"⚠ БД не найдена: {db_path} — бэкапить нечего "
@@ -64,9 +112,17 @@ def cmd_backup(db_path: Path, backup_dir: Path, keep: int) -> int:
         return 0
 
     backup_dir.mkdir(parents=True, exist_ok=True)
+    prefix = "light_" if light else "tracker_"
+
+    fresh = _fresh_backup_exists(backup_dir, prefix, min_interval_hours)
+    if fresh is not None:
+        age_h = (time.time() - fresh.stat().st_mtime) / 3600
+        print(f"Свежий бэкап уже есть ({fresh.name}, {age_h:.1f} ч назад) — пропускаю.")
+        return 0
+
     stamp = datetime.now().strftime("%Y-%m-%d")
-    final_path = backup_dir / f"tracker_{stamp}.db"
-    tmp_path = backup_dir / f"tracker_{stamp}.db.tmp"
+    final_path = backup_dir / f"{prefix}{stamp}.db"
+    tmp_path = backup_dir / f"{prefix}{stamp}.db.tmp"
 
     print(f"Бэкап {db_path} → {final_path}")
     # Источник — строго read-only: бэкап не может ничего испортить в боевой БД.
@@ -89,6 +145,17 @@ def cmd_backup(db_path: Path, backup_dir: Path, keep: int) -> int:
     finally:
         src.close()
 
+    if light:
+        full_size = tmp_path.stat().st_size
+        try:
+            _drop_trades(tmp_path)
+        except sqlite3.Error as e:
+            print(f"✘ Не смог облегчить копию: {e}")
+            tmp_path.unlink(missing_ok=True)
+            return 1
+        print(f"  облегчено: {_human_size(full_size)} → "
+              f"{_human_size(tmp_path.stat().st_size)} (без таблицы trades)")
+
     # Финальный файл появляется атомарно — прерванный бэкап не оставит
     # битый tracker_*.db, только .tmp.
     os.replace(tmp_path, final_path)
@@ -106,7 +173,7 @@ def cmd_backup(db_path: Path, backup_dir: Path, keep: int) -> int:
 
     # Ротация: имена tracker_YYYY-MM-DD.db сортируются лексикографически =
     # хронологически, поэтому старейшие — в начале списка.
-    backups = sorted(backup_dir.glob("tracker_*.db"))
+    backups = sorted(backup_dir.glob(f"{prefix}*.db"))
     excess = len(backups) - keep
     removed = 0
     for old in backups[:max(0, excess)]:
@@ -117,7 +184,7 @@ def cmd_backup(db_path: Path, backup_dir: Path, keep: int) -> int:
             print(f"  ⚠ не смог удалить старый бэкап {old.name}: {e}")
     if removed:
         print(f"  ротация: удалено {removed} старых (храним последние {keep})")
-    print(f"  всего бэкапов: {len(list(backup_dir.glob('tracker_*.db')))}")
+    print(f"  всего бэкапов: {len(list(backup_dir.glob(f'{prefix}*.db')))}")
     return 0 if ok else 1
 
 
@@ -189,6 +256,12 @@ def main(argv=None) -> int:
                         help=f"путь к БД (default: {DEFAULT_DB})")
     parser.add_argument("--backup-dir", default=DEFAULT_BACKUP_DIR,
                         help=f"папка бэкапов (default: {DEFAULT_BACKUP_DIR})")
+    parser.add_argument("--light", action="store_true",
+                        help="копия без таблицы trades: единицы МБ вместо гигабайтов, "
+                             "для выгрузки в облако")
+    parser.add_argument("--min-interval-hours", type=float, default=0.0,
+                        help="не делать бэкап, если свежий моложе N часов "
+                             "(default: 0 — делать всегда)")
     parser.add_argument("--keep", type=int, default=DEFAULT_KEEP,
                         help=f"сколько бэкапов хранить (default: {DEFAULT_KEEP})")
     parser.add_argument("--days", type=int, default=DEFAULT_RETENTION_DAYS,
@@ -208,7 +281,7 @@ def main(argv=None) -> int:
 
     rc = 0
     if args.command in ("backup", "all"):
-        rc = cmd_backup(db_path, backup_dir, args.keep)
+        rc = cmd_backup(db_path, backup_dir, args.keep, args.light, args.min_interval_hours)
         # В режиме 'all' не чистим, если бэкап не удался — это страховка.
         if rc != 0 and args.command == "all":
             print("✘ Бэкап не удался — prune пропущен (защита данных).")

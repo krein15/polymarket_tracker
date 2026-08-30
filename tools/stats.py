@@ -23,6 +23,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+# Windows-консоль работает в cp866/cp1251 и не знает части символов (стрелки,
+# галочки). Пока вывод идёт в консоль, Python печатает их через WriteConsoleW,
+# но при ПЕРЕНАПРАВЛЕНИИ (> log.txt, Планировщик задач) переключается на
+# кодировку локали и падает с UnicodeEncodeError. Заменяем непечатаемое на "?".
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):  # не TextIOWrapper — не наша забота
+        pass
+
+
 # Пути по умолчанию считаем от КОРНЯ проекта (скрипт лежит в tools/),
 # поэтому запускать можно из любой папки.
 ROOT = Path(__file__).resolve().parent.parent

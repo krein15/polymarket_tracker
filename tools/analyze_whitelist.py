@@ -17,6 +17,7 @@ analyze_whitelist.py v3 — winrate через /activity (REDEEM vs BUY).
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -28,6 +29,16 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 OUT_JSON = DATA_DIR / "whitelist_analysis.json"
 OUT_TXT = DATA_DIR / "whitelist_filtered.txt"
+
+# Windows-консоль работает в cp866/cp1251 и не знает части символов (стрелки,
+# галочки). Пока вывод идёт в консоль, Python печатает их через WriteConsoleW,
+# но при ПЕРЕНАПРАВЛЕНИИ (> log.txt, Планировщик задач) переключается на
+# кодировку локали и падает с UnicodeEncodeError. Заменяем непечатаемое на "?".
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):  # не TextIOWrapper — не наша забота
+        pass
 
 # ── Настройки ────────────────────────────────────────────────────
 MIN_WINRATE   = 0.80   # минимальный winrate

@@ -8,8 +8,9 @@ REM Python: печатать в кодировке консоли, непеча�
 REM заменять на "?" вместо падения с UnicodeEncodeError при перенаправлении вывода.
 set "PYTHONIOENCODING=cp866:replace"
 
-REM Бэкап БД перед стартом (безопасно, SQLite Online Backup API)
-call "%~dp0backup_db.bat"
+REM Бэкап БД перед стартом, но не чаще раза в 12 часов: при перезапусках
+REM трекера полная копия базы каждый раз ни к чему.
+call "%~dp0backup_db.bat" 12
 
 if not exist ".venv\Scripts\activate.bat" (
     echo [ОШИБКА] venv не найден: %CD%\.venv

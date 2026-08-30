@@ -39,6 +39,17 @@ from polymarket_tracker.scoring import FeatureExtractor, compute_score  # noqa: 
 from polymarket_tracker.storage import Storage  # noqa: E402
 from polymarket_tracker.wallet_analyzer import WalletAnalyzer  # noqa: E402
 
+# Windows-консоль работает в cp866/cp1251 и не знает части символов (стрелки,
+# галочки). Пока вывод идёт в консоль, Python печатает их через WriteConsoleW,
+# но при ПЕРЕНАПРАВЛЕНИИ (> log.txt, Планировщик задач) переключается на
+# кодировку локали и падает с UnicodeEncodeError. Заменяем непечатаемое на "?".
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):  # не TextIOWrapper — не наша забота
+        pass
+
+
 DEFAULT_DB = str(ROOT / "data" / "tracker.db")
 DEFAULT_THRESHOLDS = (20, 30, 35, 40, 45, 50, 60, 70)
 

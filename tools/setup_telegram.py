@@ -25,6 +25,17 @@ from pathlib import Path
 
 import requests
 
+# Windows-консоль работает в cp866/cp1251 и не знает части символов (стрелки,
+# галочки). Пока вывод идёт в консоль, Python печатает их через WriteConsoleW,
+# но при ПЕРЕНАПРАВЛЕНИИ (> log.txt, Планировщик задач) переключается на
+# кодировку локали и падает с UnicodeEncodeError. Заменяем непечатаемое на "?".
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):  # не TextIOWrapper — не наша забота
+        pass
+
+
 ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = ROOT / ".env"
 TIMEOUT = 15
