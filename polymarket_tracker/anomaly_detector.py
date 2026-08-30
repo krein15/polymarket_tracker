@@ -79,6 +79,7 @@ class AnomalyDetector:
         trade: Trade,
         market: Optional[MarketInfo],
         wallet: WalletAssessment,
+        history=None,
     ) -> EvaluationResult:
         """Прогнать сделку через все ветки."""
         result = EvaluationResult()
@@ -138,11 +139,16 @@ class AnomalyDetector:
         features = self.features.extract(
             trade, market, wallet,
             whitelist_tier=entry.tier if entry is not None else "",
+            history=history,
         )
         score = compute_score(features, self.config)
         result.score = score
 
-        if score.total >= self.config.score_threshold:
+        threshold = max(
+            self.config.score_threshold,
+            self.config.score_threshold_ratio * score.available_max,
+        )
+        if score.total >= threshold:
             result.signals.append(
                 Signal(
                     signal_type="score",

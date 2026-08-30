@@ -79,11 +79,22 @@ class Config:
     # Пороговый балл — стартовая гипотеза: калибруется по shadow-выборке,
     # когда наберётся статистика (tools/shadow_report.py --by-score).
     scoring_enabled: bool = True
+    # Порог сигнала: берём БОЛЬШЕЕ из абсолютного пола и доли от достижимого
+    # максимума. Одного абсолютного мало — набор доступных признаков меняется
+    # (история кошелька из API может быть недоступна, адрес может быть вне
+    # whitelist), и тогда фиксированное число означает разную строгость.
     score_threshold: float = 50.0
+    score_threshold_ratio: float = 0.5
     # Дешёвый предфильтр входа в скоринг. Заметно ниже min_trade_usdc: иначе
     # не увидим тех, кто набирает позицию частями. Замер на живых данных:
     # при $200 это ~0.7 сделок/с и ~4 запроса/с к SQLite — приемлемо.
     scoring_min_trade_usdc: float = 200.0
+
+    # История кошелька из Data API вместо ожидания локальной (см.
+    # wallet_history.py). Запрашивается только для сделок-кандидатов.
+    wallet_history_enabled: bool = True
+    wallet_history_ttl_seconds: float = 6 * 3600
+    wallet_history_concurrency: int = 3
     # Окно, в котором покупки одного кошелька по одному исходу считаются
     # набором одной позиции. 30 минут — компромисс между дроблением ордера
     # и склейкой независимых заходов.
@@ -157,7 +168,11 @@ class Config:
             allowed_tags=allowed_set,
             scoring_enabled=_bool("SCORING_ENABLED", True),
             score_threshold=_float("SCORE_THRESHOLD", 50.0),
+            score_threshold_ratio=_float("SCORE_THRESHOLD_RATIO", 0.5),
             scoring_min_trade_usdc=_float("SCORING_MIN_TRADE_USDC", 200.0),
+            wallet_history_enabled=_bool("WALLET_HISTORY_ENABLED", True),
+            wallet_history_ttl_seconds=_float("WALLET_HISTORY_TTL_SECONDS", 6 * 3600),
+            wallet_history_concurrency=_int("WALLET_HISTORY_CONCURRENCY", 3),
             accumulation_window_seconds=_int("ACCUMULATION_WINDOW_SECONDS", 1800),
             whitelist_file=_str("WHITELIST_FILE", "data/whitelist.txt"),
             whitelist_min_usdc=_float("WHITELIST_MIN_USDC", 200.0),

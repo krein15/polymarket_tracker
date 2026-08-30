@@ -128,6 +128,10 @@ class Features:
     price: float
     volume_24h: float
     whitelist_tier: str = ""
+    # Признаки кошелька посчитаны по истории из API, а не по локальной базе.
+    # Если True — правило холодного старта не применяется: цифры честные
+    # с первой же сделки.
+    wallet_from_api: bool = False
     is_hedged: bool = False  # купил ОБА исхода рынка — мнения о результате нет  # "pass" | "watch" | "" — уровень в whitelist
 
 
@@ -137,6 +141,12 @@ class Score:
 
     total: float
     parts: dict = field(default_factory=dict)  # признак -> баллы
+    # Максимум, достижимый на ЭТОЙ сделке: признаки кошелька считаются, только
+    # если их есть чем посчитать, whitelist — только если адрес в списке.
+    # Нужен, чтобы порог не зависел от того, какие источники сейчас доступны:
+    # при недоступном API максимум падает со 120 до 70, и фиксированный порог
+    # превращается в «нужен идеальный максимум».
+    available_max: float = 0.0
     notes: list = field(default_factory=list)  # человекочитаемые пояснения
 
     def parts_json(self) -> str:
@@ -198,6 +208,7 @@ class FeatureExtractor:
         market: "MarketInfo",
         wallet: "WalletAssessment",
         whitelist_tier: str = "",
+        history=None,
     ) -> Features:
         cfg = self.config
         acc_since = trade.timestamp - cfg.accumulation_window_seconds
@@ -220,7 +231,18 @@ class FeatureExtractor:
 
         relative = (accumulated / baseline) if baseline and baseline > 0 else None
 
-        prev_ts = self.storage.wallet_prev_trade_ts(trade.maker, trade.timestamp)
+        # История из API точнее локальной: она знает кошелёк с его первой
+        # сделки, а не с момента, когда мы его впервые увидели.
+        if history is not None:
+            prev_ts = history.prev_trade_ts(trade.timestamp)
+            if prev_ts is None:
+                prev_ts = self.storage.wallet_prev_trade_ts(trade.maker, trade.timestamp)
+            is_new_wallet = history.is_new(
+                cfg.new_wallet_max_trades, cfg.new_wallet_max_age_days, trade.timestamp
+            )
+        else:
+            prev_ts = self.storage.wallet_prev_trade_ts(trade.maker, trade.timestamp)
+            is_new_wallet = wallet.is_new
         dormant_days = (
             (trade.timestamp - prev_ts) / 86400.0 if prev_ts is not None else None
         )
@@ -245,7 +267,8 @@ class FeatureExtractor:
             cluster_all_wallets=cluster_all,
             history_days=self._history_days(trade.timestamp),
             whitelist_tier=whitelist_tier,
-            is_new_wallet=wallet.is_new,
+            is_new_wallet=is_new_wallet,
+            wallet_from_api=history is not None,
             is_market_maker=self.storage.wallet_traded_both_sides(
                 trade.maker, trade.token_id
             ),
@@ -283,7 +306,9 @@ def compute_score(features: Features, config: "Config") -> Score:
 
     # Признаки кошелька работают только на достаточной истории (см. модульный
     # докстринг): иначе они шумят и перевешивают всё остальное.
-    wallet_features_ready = f.history_days >= HISTORY_MIN_DAYS
+    # История из API снимает холодный старт: там возраст настоящий, а не
+    # «сколько мы успели посмотреть».
+    wallet_features_ready = f.wallet_from_api or f.history_days >= HISTORY_MIN_DAYS
     if not wallet_features_ready:
         notes.append(
             f"новизна и кластер не учтены: локальной истории всего "
@@ -337,4 +362,22 @@ def compute_score(features: Features, config: "Config") -> Score:
         parts["near_resolved"] = NEAR_RESOLVED_PENALTY
         notes.append(f"рынок почти решён @ {f.price:.3f}")
 
-    return Score(total=float(sum(parts.values())), parts=parts, notes=notes)
+    available = (
+        MARKET_RELATIVE_STEPS[0][1]   # оборот относительно обычного
+        + ACCUMULATION_STEPS[0][1]    # набор позиции частями
+        + CHEAP_TAIL_STEPS[0][1]      # дешёвый хвост
+        + ILLIQUID_POINTS
+    )
+    if wallet_features_ready:
+        available += WALLET_NEW_POINTS + DORMANT_STEPS[0][1] + CLUSTER_STEPS[0][1]
+    if f.whitelist_tier == "pass":
+        available += WHITELIST_PASS_POINTS
+    elif f.whitelist_tier == "watch":
+        available += WHITELIST_WATCH_POINTS
+
+    return Score(
+        total=float(sum(parts.values())),
+        parts=parts,
+        notes=notes,
+        available_max=float(available),
+    )

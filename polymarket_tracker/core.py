@@ -24,6 +24,7 @@ from .storage import Storage
 from .telegram_commands import TelegramCommandHandler
 from .telegram_notifier import TelegramNotifier
 from .wallet_analyzer import WalletAnalyzer
+from .wallet_history import WalletHistoryProvider
 from .watchlist import Watchlist
 
 log = logging.getLogger(__name__)
@@ -98,6 +99,15 @@ class PolymarketTracker:
         self.outcome_market_ctx = MarketContext()
         self.outcome_tracker = OutcomeTracker(self.storage, self.outcome_market_ctx)
         self.commands = TelegramCommandHandler(config, self.storage)
+        # История кошелька из API — снимает холодный старт признаков.
+        # Запрашивается только для сделок-кандидатов, с кэшем.
+        self.wallet_history = (
+            WalletHistoryProvider(
+                ttl_seconds=config.wallet_history_ttl_seconds,
+                max_concurrency=config.wallet_history_concurrency,
+            )
+            if config.wallet_history_enabled else None
+        )
 
         # Счётчики для периодической статистики
         self._stats_trades = 0
@@ -120,6 +130,8 @@ class PolymarketTracker:
         """Основной цикл. Работает до Ctrl+C."""
         await self.market_ctx.start()
         await self.outcome_market_ctx.start()
+        if self.wallet_history is not None:
+            await self.wallet_history.start()
         await self.notifier.start()
 
         # Возобновление с последнего сохранённого timestamp
@@ -172,6 +184,8 @@ class PolymarketTracker:
                     pass
             await self.market_ctx.close()
             await self.outcome_market_ctx.close()
+            if self.wallet_history is not None:
+                await self.wallet_history.close()
             await self.listener.close()
             await self.notifier.close()
             await self.commands.close()
@@ -266,8 +280,15 @@ class PolymarketTracker:
             )
             log.debug("Market metadata из Trade (Gamma промахнулся): %s", trade.slug)
 
+        # 5.5. История кошелька из API. Только для кандидатов (мелочь сюда
+        # не доходит — отсеяна быстрым фильтром выше), с кэшем и молчаливым
+        # откатом на локальные данные при недоступности API.
+        history = None
+        if self.wallet_history is not None:
+            history = await self.wallet_history.get(trade.maker, now=time.time())
+
         # 6. Прогнать через детектор
-        result = self.detector.evaluate(trade, market, assessment)
+        result = self.detector.evaluate(trade, market, assessment, history=history)
         signals = result.signals
 
         if signals:
