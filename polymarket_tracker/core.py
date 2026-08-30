@@ -28,6 +28,11 @@ from .watchlist import Watchlist
 
 log = logging.getLogger(__name__)
 
+# Чекпоинт пишем не на каждую сделку, а раз в CHECKPOINT_EVERY: это была треть
+# всех записей в БД. Потеря последних секунд безопасна — листенер перечитает
+# сделки от последнего сохранённого ts, а save_trade отсеет дубликаты.
+CHECKPOINT_EVERY = 25
+
 
 class _TokenRedactor(logging.Filter):
     """Вырезает токен бота из логов.
@@ -99,6 +104,10 @@ class PolymarketTracker:
         self._stats_signals = 0
         self._stats_started_at = time.time()
 
+        # Отложенный чекпоинт
+        self._checkpoint_ts = 0
+        self._since_checkpoint = 0
+
     @classmethod
     def from_env(cls, env_path: str = ".env") -> "PolymarketTracker":
         cfg = Config.from_env(env_path)
@@ -166,6 +175,16 @@ class PolymarketTracker:
             await self.listener.close()
             await self.notifier.close()
             await self.commands.close()
+            # Коммит отложен пачками — без этого последние секунды работы
+            # (включая чекпоинт) остались бы незаписанными.
+            self._flush_checkpoint()
+            self.storage.close()
+
+    def _flush_checkpoint(self) -> None:
+        """Записать накопленный чекпоинт, если есть что писать."""
+        if self._checkpoint_ts and self._since_checkpoint:
+            self.storage.set_checkpoint("last_trade_ts", str(self._checkpoint_ts))
+            self._since_checkpoint = 0
 
     def _get_start_ts(self) -> int:
         """Возобновление с последнего сохранённого timestamp сделки."""
@@ -204,8 +223,11 @@ class PolymarketTracker:
         )
         assessment = self.wallet_analyzer.assess(wallet_stats)
 
-        # 3. Обновить чекпоинт
-        self.storage.set_checkpoint("last_trade_ts", str(trade.timestamp))
+        # 3. Чекпоинт — пачкой, а не на каждую сделку (см. CHECKPOINT_EVERY)
+        self._checkpoint_ts = max(self._checkpoint_ts, trade.timestamp)
+        self._since_checkpoint += 1
+        if self._since_checkpoint >= CHECKPOINT_EVERY:
+            self._flush_checkpoint()
 
         # 4. Быстрый фильтр: если сделка мелкая И не whitelist — не тратим запрос к Gamma.
         # Порог берём минимальный из двух: скоринг работает с сделками заметно

@@ -8,6 +8,7 @@ PRIMARY KEY теперь (tx_hash, maker, token_id) вместо (tx_hash, log_i
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -140,11 +141,47 @@ class WalletStats:
         return (now - self.first_seen_ts) / 86400.0
 
 
-class Storage:
-    """Потокобезопасный SQLite wrapper (writes сериализуются через lock)."""
+# Отложенный коммит: фиксируем накопленное раз в COMMIT_EVERY записей или
+# раз в COMMIT_INTERVAL секунд — что наступит раньше. Замер в
+# docs/PERFORMANCE.md: коммит на каждую операцию стоил 82 КБ записи на диск
+# на одну сделку в 300 байт (~190 ГБ в сутки), пачками — 2 КБ.
+COMMIT_EVERY = 50
+COMMIT_INTERVAL_SEC = 2.0
 
-    def __init__(self, db_path: str):
+
+class Storage:
+    """SQLite-хранилище: одно долгоживущее соединение, отложенный коммит.
+
+    Раньше каждая операция открывала своё соединение и коммитила отдельно —
+    три транзакции на сделку, 46 IO-операций, ~190 ГБ записи в сутки. Теперь
+    соединение одно, а коммит откладывается до COMMIT_EVERY записей или
+    COMMIT_INTERVAL_SEC секунд.
+
+    Чем платим: при аварийном завершении теряется последняя незакоммиченная
+    пачка — секунды данных. Для трекера это безопасно: чекпоинт лежит в той же
+    транзакции, поэтому после перезапуска листенер перечитает те же сделки, а
+    save_trade отсеет их как дубликаты. По той же причине откат при ошибке
+    (rollback) теряет всю пачку целиком, а не одну запись, — данные вернутся
+    со следующим проходом листенера.
+
+    Доступ сериализуется блокировкой: соединение общее для всех задач
+    asyncio-цикла. Режим WAL позволяет читателям из ДРУГИХ процессов
+    (tools/stats.py и прочие) работать, пока трекер пишет.
+    """
+
+    def __init__(
+        self,
+        db_path: str,
+        commit_every: int = COMMIT_EVERY,
+        commit_interval: float = COMMIT_INTERVAL_SEC,
+    ):
         self.db_path = db_path
+        self._commit_every = commit_every
+        self._commit_interval = commit_interval
+        self._lock = threading.RLock()
+        self._connection: Optional[sqlite3.Connection] = None
+        self._pending = 0
+        self._last_commit = time.monotonic()
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA)
@@ -169,19 +206,73 @@ class Storage:
                 except sqlite3.OperationalError as e:
                     if "duplicate column" not in str(e).lower():
                         raise
+        # Схема должна лечь на диск сразу, а не ждать пачку.
+        self.flush()
+
+    def _open(self) -> sqlite3.Connection:
+        """Создать соединение и выставить режимы. Ленивая инициализация."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        # WAL: читатель из другого процесса не блокируется писателем.
+        # synchronous=NORMAL при WAL теряет максимум последнюю транзакцию при
+        # отключении питания, но не рушит базу — размен, который для трекера
+        # оправдан (см. docs/PERFORMANCE.md).
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path, timeout=10.0)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        with self._lock:
+            if self._connection is None:
+                self._connection = self._open()
+            conn = self._connection
+            # total_changes — счётчик изменённых строк за всё время соединения.
+            # По нему отличаем запись от чтения: in_transaction для этого не
+            # годится, он остаётся истинным после первой же записи, и тогда
+            # каждое последующее чтение накручивало бы пачку (а их в скоринге
+            # по шесть на сделку).
+            changes_before = conn.total_changes
+            try:
+                yield conn
+            except Exception:
+                # Откат отменяет всю незакоммиченную пачку — см. докстринг класса.
+                conn.rollback()
+                self._pending = 0
+                self._last_commit = time.monotonic()
+                raise
+            if conn.total_changes != changes_before:
+                self._pending += 1
+                if (
+                    self._pending >= self._commit_every
+                    or time.monotonic() - self._last_commit >= self._commit_interval
+                ):
+                    self._commit_locked()
+
+    def _commit_locked(self) -> None:
+        """Коммит. Вызывать только под self._lock."""
+        if self._connection is not None and self._connection.in_transaction:
+            self._connection.commit()
+        self._pending = 0
+        self._last_commit = time.monotonic()
+
+    def flush(self) -> None:
+        """Зафиксировать отложенное немедленно.
+
+        Вызывается при остановке трекера и перед операциями, которым нужен
+        эксклюзивный доступ к файлу (vacuum).
+        """
+        with self._lock:
+            self._commit_locked()
+
+    def close(self) -> None:
+        """Дописать пачку и закрыть соединение."""
+        with self._lock:
+            if self._connection is not None:
+                self._commit_locked()
+                self._connection.close()
+                self._connection = None
 
     # ───────── Wallets ─────────
 
@@ -642,6 +733,9 @@ class Storage:
         Требует эксклюзивного доступа — запускать при ОСТАНОВЛЕННОМ трекере,
         иначе sqlite3 кинет 'database is locked'.
         """
+        # Своё соединение держит файл — дописываем пачку и отпускаем,
+        # иначе VACUUM упрётся в 'database is locked'.
+        self.close()
         conn = sqlite3.connect(self.db_path, timeout=30.0, isolation_level=None)
         try:
             conn.execute("VACUUM")
