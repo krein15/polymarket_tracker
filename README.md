@@ -180,6 +180,7 @@ Polymarket_tracker/                 ← корень проекта (запус�
 ├── scripts/                        ← .bat для Windows, пути относительные
 │   ├── start_tracker.bat           ← бэкап БД + запуск трекера
 │   ├── backup_db.bat               ← только бэкап
+│   ├── backup_cloud.bat            ← лёгкий бэкап в Яндекс.Диск
 │   ├── git_push.bat                ← add + commit + push
 │   └── git_init.bat                ← разовая инициализация репозитория
 │
