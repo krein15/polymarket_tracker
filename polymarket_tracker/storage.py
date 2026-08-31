@@ -366,6 +366,27 @@ class Storage:
             except sqlite3.IntegrityError:
                 return False
 
+    def count_cluster_participants(
+        self, token_id: str, since_ts: int, min_usdc: float
+    ) -> int:
+        """Сколько РАЗНЫХ кошельков купили этот исход на сумму от min_usdc.
+
+        Пришло на смену подсчёту "новых" кошельков. Тот опирался на локальный
+        trade_count, а на молодой базе 86% адресов имеют меньше 20 сделок —
+        то есть признак означал просто "несколько участников" и срабатывал
+        почти везде: 82% сигналов держались на нём.
+
+        Деньги — честный признак толпы: скинуться по $500 на один исход за
+        час случайно не выходит.
+        """
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COUNT(DISTINCT maker) AS n FROM trades "
+                "WHERE token_id = ? AND ts >= ? AND side = 'buy' AND usdc_amount >= ?",
+                (token_id, since_ts, min_usdc),
+            ).fetchone()
+            return int(row["n"] or 0)
+
     def count_recent_new_wallets_for_token(
         self, token_id: str, since_ts: int, max_trades: int
     ) -> int:

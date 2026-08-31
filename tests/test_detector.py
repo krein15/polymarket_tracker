@@ -101,6 +101,9 @@ class TestThreshold:
 
     def test_балл_выше_порога_даёт_сигнал_score(self, config, storage):
         config.score_threshold = 1.0
+        # Порог берёт максимум из пола и доли от достижимого максимума —
+        # долю тоже обнуляем, иначе она перебьёт пол.
+        config.score_threshold_ratio = 0.0
         t = make_trade()
         save(storage, t)
         r = detector(config, storage).evaluate(t, make_market(), make_wallet())

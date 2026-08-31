@@ -59,7 +59,7 @@ class TestWalletHistory:
 def features(**kw):
     base = dict(
         accumulated_usdc=5000.0, accumulation_trades=1, baseline_hourly=100.0,
-        market_relative=5.0, dormant_days=None, cluster_new_wallets=0,
+        market_relative=5.0, dormant_days=None, cluster_wallets=0,
         cluster_all_wallets=1, history_days=0.1, is_new_wallet=False,
         is_market_maker=False, price=0.5, volume_24h=1000.0,
     )
@@ -72,7 +72,7 @@ class TestAvailableMax:
 
     def test_холодный_старт_без_признаков_кошелька(self, config):
         s = compute_score(features(), config)
-        assert s.available_max == 70
+        assert s.available_max == 90
 
     def test_история_из_api_открывает_признаки_кошелька(self, config):
         s = compute_score(features(wallet_from_api=True), config)

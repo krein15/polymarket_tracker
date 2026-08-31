@@ -148,7 +148,10 @@ class AnomalyDetector:
             self.config.score_threshold,
             self.config.score_threshold_ratio * score.available_max,
         )
-        if score.total >= threshold:
+        # Сумму берём накопленную за окно, а не одну покупку: тот, кто набрал
+        # $6000 двадцатью заходами по $300, — как раз интересный случай.
+        money = max(trade.usdc_amount, features.accumulated_usdc)
+        if score.total >= threshold and money >= self.config.signal_min_usdc:
             result.signals.append(
                 Signal(
                     signal_type="score",
@@ -156,7 +159,7 @@ class AnomalyDetector:
                     market=market,
                     wallet=wallet,
                     reason=f"Балл {score.total:.0f}: {score.summary()}",
-                    cluster_size=features.cluster_new_wallets,
+                    cluster_size=features.cluster_wallets,
                     score=score,
                 )
             )

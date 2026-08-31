@@ -120,7 +120,7 @@ class Features:
     baseline_hourly: Optional[float]  # обычный часовой оборот рынка
     market_relative: Optional[float]  # accumulated / baseline_hourly
     dormant_days: Optional[float]  # сколько молчал до этой сделки
-    cluster_new_wallets: int  # НОВЫХ кошельков в исходе за окно
+    cluster_wallets: int  # участников с крупной покупкой в исходе за окно
     cluster_all_wallets: int  # всего участников за окно — для контекста в пояснении
     history_days: float  # сколько дней локальной истории накоплено
     is_new_wallet: bool
@@ -248,10 +248,8 @@ class FeatureExtractor:
         )
 
         cluster_since = trade.timestamp - cfg.cluster_window_seconds
-        cluster_new = self.storage.count_recent_new_wallets_for_token(
-            token_id=trade.token_id,
-            since_ts=cluster_since,
-            max_trades=cfg.new_wallet_max_trades,
+        cluster_wallets = self.storage.count_cluster_participants(
+            trade.token_id, cluster_since, cfg.cluster_min_participant_usdc
         )
         cluster_all = self.storage.count_distinct_wallets_for_token(
             trade.token_id, cluster_since
@@ -263,7 +261,7 @@ class FeatureExtractor:
             baseline_hourly=baseline,
             market_relative=relative,
             dormant_days=dormant_days,
-            cluster_new_wallets=cluster_new,
+            cluster_wallets=cluster_wallets,
             cluster_all_wallets=cluster_all,
             history_days=self._history_days(trade.timestamp),
             whitelist_tier=whitelist_tier,
@@ -325,14 +323,16 @@ def compute_score(features: Features, config: "Config") -> Score:
             parts["dormant_wake"] = pts
             notes.append(f"молчал {f.dormant_days:.0f} дней и вернулся")
 
-    if wallet_features_ready:
-        pts = _steps(f.cluster_new_wallets, CLUSTER_STEPS)
-        if pts:
-            parts["cluster"] = pts
-            notes.append(
-                f"кластер: {f.cluster_new_wallets} новых кошельков "
-                f"из {f.cluster_all_wallets} участников за окно"
-            )
+    # Кластер вне правила холодного старта: он больше не про новизну
+    # кошельков, а про то, сколько РАЗНЫХ адресов зашли крупно. Деньги видны
+    # в своей базе с первой минуты и от истории кошелька не зависят.
+    pts = _steps(f.cluster_wallets, CLUSTER_STEPS)
+    if pts:
+        parts["cluster"] = pts
+        notes.append(
+            f"кластер: {f.cluster_wallets} кошельков зашли крупно "
+            f"из {f.cluster_all_wallets} участников за окно"
+        )
 
     if f.whitelist_tier == "pass":
         parts["whitelist"] = WHITELIST_PASS_POINTS
@@ -367,9 +367,10 @@ def compute_score(features: Features, config: "Config") -> Score:
         + ACCUMULATION_STEPS[0][1]    # набор позиции частями
         + CHEAP_TAIL_STEPS[0][1]      # дешёвый хвост
         + ILLIQUID_POINTS
+        + CLUSTER_STEPS[0][1]         # кластер считается всегда, см. выше
     )
     if wallet_features_ready:
-        available += WALLET_NEW_POINTS + DORMANT_STEPS[0][1] + CLUSTER_STEPS[0][1]
+        available += WALLET_NEW_POINTS + DORMANT_STEPS[0][1]
     if f.whitelist_tier == "pass":
         available += WHITELIST_PASS_POINTS
     elif f.whitelist_tier == "watch":

@@ -66,6 +66,9 @@ class Config:
     new_wallet_max_trades: int = 20
     new_wallet_max_age_days: int = 30
     cluster_min_wallets: int = 2
+    # Минимальный вклад участника, чтобы попасть в кластер. Без него кластер
+    # считал любых участников подряд (см. count_cluster_participants).
+    cluster_min_participant_usdc: float = 500.0
     cluster_window_seconds: int = 3600
 
     # Category filter
@@ -85,6 +88,10 @@ class Config:
     # whitelist), и тогда фиксированное число означает разную строгость.
     score_threshold: float = 50.0
     score_threshold_ratio: float = 0.5
+    # Ниже этой суммы сигнал не отправляем, даже если балл набран: сделка на
+    # $300 не действие, а шум. Считается по НАКОПЛЕННОМУ за окно, а не по
+    # одной покупке, — иначе потеряем тех, кто набирает позицию частями.
+    signal_min_usdc: float = 2000.0
     # Дешёвый предфильтр входа в скоринг. Заметно ниже min_trade_usdc: иначе
     # не увидим тех, кто набирает позицию частями. Замер на живых данных:
     # при $200 это ~0.7 сделок/с и ~4 запроса/с к SQLite — приемлемо.
@@ -170,12 +177,14 @@ class Config:
             new_wallet_max_trades=_int("NEW_WALLET_MAX_TRADES", 20),
             new_wallet_max_age_days=_int("NEW_WALLET_MAX_AGE_DAYS", 30),
             cluster_min_wallets=_int("CLUSTER_MIN_WALLETS", 2),
+            cluster_min_participant_usdc=_float("CLUSTER_MIN_PARTICIPANT_USDC", 500.0),
             cluster_window_seconds=_int("CLUSTER_WINDOW_SECONDS", 3600),
             ignored_categories=ignored_set,
             allowed_tags=allowed_set,
             scoring_enabled=_bool("SCORING_ENABLED", True),
             score_threshold=_float("SCORE_THRESHOLD", 50.0),
             score_threshold_ratio=_float("SCORE_THRESHOLD_RATIO", 0.5),
+            signal_min_usdc=_float("SIGNAL_MIN_USDC", 2000.0),
             scoring_min_trade_usdc=_float("SCORING_MIN_TRADE_USDC", 200.0),
             wallet_history_enabled=_bool("WALLET_HISTORY_ENABLED", True),
             wallet_history_ttl_seconds=_float("WALLET_HISTORY_TTL_SECONDS", 6 * 3600),
