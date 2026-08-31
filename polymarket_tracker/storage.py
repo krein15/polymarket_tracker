@@ -737,6 +737,26 @@ class Storage:
 
     # ───────── Maintenance (пункт 0.2 TODO) ─────────
 
+    def last_trade_ts(self) -> Optional[int]:
+        """Время самой свежей сделки — для сторожа потока в heartbeat."""
+        with self._conn() as c:
+            row = c.execute("SELECT MAX(ts) AS ts FROM trades").fetchone()
+            return int(row["ts"]) if row and row["ts"] is not None else None
+
+    def count_signals(self) -> int:
+        with self._conn() as c:
+            return c.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+
+    def count_wallets(self) -> int:
+        with self._conn() as c:
+            return c.execute("SELECT COUNT(*) FROM wallets").fetchone()[0]
+
+    def count_resolved_outcomes(self) -> int:
+        with self._conn() as c:
+            return c.execute(
+                "SELECT COUNT(*) FROM signal_outcomes WHERE market_resolved = 1"
+            ).fetchone()[0]
+
     def count_trades(self) -> int:
         """Сколько строк в trades — для отчётности обслуживания."""
         with self._conn() as c:

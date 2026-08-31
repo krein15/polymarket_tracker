@@ -95,6 +95,13 @@ class Config:
     wallet_history_enabled: bool = True
     wallet_history_ttl_seconds: float = 6 * 3600
     wallet_history_concurrency: int = 3
+
+    # Сигнал жизни: без него смерть трекера замечается через сутки (см.
+    # heartbeat.py). Порог простоя — 20 минут, это четыре пропущенные
+    # пятиминутные пачки Data API подряд.
+    heartbeat_enabled: bool = True
+    heartbeat_interval_hours: float = 24.0
+    stall_alert_minutes: float = 20.0
     # Окно, в котором покупки одного кошелька по одному исходу считаются
     # набором одной позиции. 30 минут — компромисс между дроблением ордера
     # и склейкой независимых заходов.
@@ -173,6 +180,9 @@ class Config:
             wallet_history_enabled=_bool("WALLET_HISTORY_ENABLED", True),
             wallet_history_ttl_seconds=_float("WALLET_HISTORY_TTL_SECONDS", 6 * 3600),
             wallet_history_concurrency=_int("WALLET_HISTORY_CONCURRENCY", 3),
+            heartbeat_enabled=_bool("HEARTBEAT_ENABLED", True),
+            heartbeat_interval_hours=_float("HEARTBEAT_INTERVAL_HOURS", 24.0),
+            stall_alert_minutes=_float("STALL_ALERT_MINUTES", 20.0),
             accumulation_window_seconds=_int("ACCUMULATION_WINDOW_SECONDS", 1800),
             whitelist_file=_str("WHITELIST_FILE", "data/whitelist.txt"),
             whitelist_min_usdc=_float("WHITELIST_MIN_USDC", 200.0),

@@ -209,15 +209,28 @@ python -c "import sqlite3; c=sqlite3.connect('data/tracker.db'); [print(t, c.exe
 
 ### Шаг 9. Автозапуск
 
-**Планировщик задач** (для постоянной работы):
-Win+R → `taskschd.msc` → Create Task → имя «Polymarket Tracker» →
-Triggers: At startup →
-Actions: Start a program → `C:\путь\до\Polymarket_tracker\.venv\Scripts\python.exe`,
-аргументы `tracker_main.py`, Start in `C:\путь\до\Polymarket_tracker` →
-Settings → ✅ «If the task fails, restart every 1 minute, up to 999 times».
+**Уже настроено.** Задача Планировщика `Polymarket Tracker` поднимает трекер
+при входе в систему (с минутной задержкой, чтобы сеть успела подняться) и
+перезапускает его при падении — раз в минуту, до 999 попыток. Ограничение
+времени выполнения снято: задача рассчитана на недели работы, а по умолчанию
+Windows убивает задачи через трое суток.
 
-Проще: оставить окно `start_tracker.bat` свёрнутым, но после перезагрузки
-запускать руками.
+```cmd
+schtasks /Query /TN "Polymarket Tracker" /V /FO LIST
+schtasks /Run /TN "Polymarket Tracker"
+schtasks /End /TN "Polymarket Tracker"
+```
+
+Второй копии можно не бояться: трекер держит файл-замок `data\tracker.lock`
+и при попытке запустить вторую выходит с понятным сообщением. Без замка две
+копии дрались бы за команды Telegram (каждая забирала бы часть) и дублировали
+работу по одной базе.
+
+Запуск вручную остаётся прежним:
+
+```cmd
+scripts\start_tracker.bat
+```
 
 ### Шаг 10. Зафиксировать бейзлайн
 

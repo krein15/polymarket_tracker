@@ -24,6 +24,7 @@ from .storage import Storage
 from .telegram_commands import TelegramCommandHandler
 from .telegram_notifier import TelegramNotifier
 from .wallet_analyzer import WalletAnalyzer
+from .heartbeat import Heartbeat, TrackerStats
 from .wallet_history import WalletHistoryProvider
 from .watchlist import Watchlist
 
@@ -163,6 +164,12 @@ class PolymarketTracker:
         stats_task = asyncio.create_task(self._stats_loop())
         outcome_task = asyncio.create_task(self.outcome_tracker.run())
         commands_task = asyncio.create_task(self.commands.run())
+        heartbeat_task = (
+            asyncio.create_task(
+                Heartbeat(self.notifier, self._collect_stats, self.config).run()
+            )
+            if self.config.heartbeat_enabled else None
+        )
 
         try:
             async for trade in self.listener.stream_trades(start_ts=start_ts):
@@ -176,8 +183,12 @@ class PolymarketTracker:
             stats_task.cancel()
             outcome_task.cancel()
             commands_task.cancel()
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
             # Дать задачам корректно завершиться (подавляем CancelledError)
-            for t in (stats_task, outcome_task, commands_task):
+            for t in (stats_task, outcome_task, commands_task, heartbeat_task):
+                if t is None:
+                    continue
                 try:
                     await t
                 except (asyncio.CancelledError, Exception):
@@ -382,6 +393,22 @@ class PolymarketTracker:
         msg_id = await self.notifier.send_signal(signal)
         if msg_id:
             self.storage.update_signal_telegram(signal_id, msg_id)
+
+    def _collect_stats(self) -> TrackerStats:
+        """Снимок для сводки. Синхронный: запросы к SQLite дешёвые."""
+        last_ts = self.storage.last_trade_ts()
+        return TrackerStats(
+            uptime_hours=(time.time() - self._stats_started_at) / 3600.0,
+            trades_processed=self._stats_trades,
+            signals_sent=self._stats_signals,
+            last_trade_age_min=(
+                (time.time() - last_ts) / 60.0 if last_ts else None
+            ),
+            trades_total=self.storage.count_trades(),
+            signals_total=self.storage.count_signals(),
+            resolved_total=self.storage.count_resolved_outcomes(),
+            wallets_total=self.storage.count_wallets(),
+        )
 
     async def _stats_loop(self) -> None:
         """Раз в час пишем в лог сводку."""
