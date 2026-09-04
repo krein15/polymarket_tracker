@@ -72,12 +72,39 @@ def _release_lock() -> None:
         _lock_handle = None
 
 
+# Лог на диск: до этого всё уходило только в консоль и терялось при
+# перезапуске — разобраться с ошибкой постфактум было невозможно.
+# Ротация по 5 МБ, три файла: этого хватает на несколько дней и не растёт.
+LOG_PATH = Path("data") / "tracker.log"
+LOG_MAX_BYTES = 5 * 1024 * 1024
+LOG_BACKUPS = 3
+
+
 def setup_logging(level: str = "INFO") -> None:
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, level.upper(), logging.INFO))
+
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+
+    try:
+        from logging.handlers import RotatingFileHandler
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        # encoding обязателен: без него на Windows файл пишется в кодировке
+        # локали и русские сообщения в нём нечитаемы.
+        file_handler = RotatingFileHandler(
+            LOG_PATH, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(fmt)
+        root.addHandler(file_handler)
+    except OSError as e:
+        root.warning("Не смог открыть файл лога %s: %s", LOG_PATH, e)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
