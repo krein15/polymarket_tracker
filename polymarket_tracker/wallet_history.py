@@ -95,6 +95,8 @@ class WalletHistoryProvider:
         # Отдельно помним неудачи, чтобы не долбить API по кругу на одном
         # и том же кошельке: адрес -> когда пробовали.
         self._failed: Dict[str, float] = {}
+        self._inflight: set = set()
+        self._tasks: set = set()
         self._sem = asyncio.Semaphore(max_concurrency)
         self.stats = {"hit": 0, "miss": 0, "fail": 0}
 
@@ -110,8 +112,55 @@ class WalletHistoryProvider:
             await self._session.close()
         self._session = None
 
+    def cached(self, address: str, now: Optional[float] = None) -> Optional[WalletHistory]:
+        """Готовая история из кэша, без сети. None — если ещё не загружена."""
+        now = now if now is not None else time.time()
+        entry = self._cache.get(address.lower())
+        if entry and now - entry.fetched_at < self.ttl:
+            self.stats["hit"] += 1
+            return entry
+        return None
+
+    def prefetch(self, address: str, now: Optional[float] = None) -> None:
+        """Загрузить историю в фоне, не задерживая обработку сделки.
+
+        Цикл приёма обрабатывает сделки последовательно, поэтому await прямо
+        здесь означал бы ожидание сети на каждой крупной сделке. Замер: 707
+        уникальных кошельков в час среди сделок от $200, и база отставала от
+        API на 8-10 минут — больше, чем окно выборки, то есть сделки терялись.
+
+        Поэтому первая сделка кошелька считается по локальным данным, а
+        история подтягивается к следующей.
+        """
+        key = address.lower()
+        if key in self._inflight:
+            return
+        now = now if now is not None else time.time()
+        if self.cached(key, now) is not None:
+            return
+        failed_at = self._failed.get(key)
+        if failed_at is not None and now - failed_at < 300:
+            return
+        self._inflight.add(key)
+        task = asyncio.create_task(self._prefetch_one(key, now))
+        # Ссылку держим, иначе задачу может собрать сборщик мусора.
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _prefetch_one(self, key: str, now: float) -> None:
+        try:
+            history = await self._fetch(key, now)
+            if history is None:
+                self.stats["fail"] += 1
+                self._failed[key] = now
+            else:
+                self.stats["miss"] += 1
+                self._remember(key, history)
+        finally:
+            self._inflight.discard(key)
+
     async def get(self, address: str, now: Optional[float] = None) -> Optional[WalletHistory]:
-        """История кошелька или None, если API недоступен."""
+        """История кошелька или None, если API недоступен. Ждёт сеть."""
         now = now if now is not None else time.time()
         key = address.lower()
 

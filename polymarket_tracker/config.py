@@ -57,7 +57,11 @@ class Config:
 
     # Data API (заменили ончейн-листенер)
     data_api_poll_interval: float = 3.0  # сек между запросами к /trades
-    data_api_batch_limit: int = 200  # размер выборки на один запрос (max 10000)
+    data_api_batch_limit: int = 200
+    # Сколько страниц догружать назад, пока не дойдём до чекпоинта. Одна
+    # страница в 10000 сделок покрывает ~8 минут потока, а простои бывают
+    # длиннее — без догрузки разрыв отсекался молча.
+    data_api_max_pages: int = 6  # размер выборки на один запрос (max 10000)
 
     # Signal filters
     min_trade_usdc: float = 500.0
@@ -171,6 +175,7 @@ class Config:
             telegram_chat_id=_str("TELEGRAM_CHAT_ID", ""),
             data_api_poll_interval=_float("DATA_API_POLL_INTERVAL", 3.0),
             data_api_batch_limit=_int("DATA_API_BATCH_LIMIT", 200),
+            data_api_max_pages=_int("DATA_API_MAX_PAGES", 6),
             min_trade_usdc=_float("MIN_TRADE_USDC", 500.0),
             max_trade_price=_float("MAX_TRADE_PRICE", 0.95),
             max_market_volume_24h=_float("MAX_MARKET_VOLUME_24H", 100_000.0),

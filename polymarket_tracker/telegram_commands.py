@@ -145,6 +145,15 @@ class TelegramCommandHandler:
             except asyncio.CancelledError:
                 log.info("TelegramCommandHandler остановлен")
                 raise
+            except asyncio.TimeoutError:
+                # Long-poll держит соединение POLL_TIMEOUT секунд; если Telegram
+                # не ответил вовремя, aiohttp бросает TimeoutError. Это штатное
+                # событие сети, а не сбой: раньше оно попадало в общий
+                # обработчик и печаталось как ERROR с полным трейсбеком.
+                log.debug("Telegram long-poll: таймаут, повторяю")
+                await self.close()
+                self._session = self._make_session()
+                continue
             except aiohttp.ClientError as e:
                 consecutive_errors += 1
                 backoff = min(60.0, 3.0 * consecutive_errors)

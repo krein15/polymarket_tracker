@@ -294,9 +294,16 @@ class PolymarketTracker:
         # 5.5. История кошелька из API. Только для кандидатов (мелочь сюда
         # не доходит — отсеяна быстрым фильтром выше), с кэшем и молчаливым
         # откатом на локальные данные при недоступности API.
+        # Берём только готовую историю: ждать сеть здесь нельзя — цикл приёма
+        # последовательный, и каждая секунда ожидания превращается в отставание
+        # от API. Если истории ещё нет, ставим фоновую загрузку и считаем
+        # признаки по локальным данным; к следующей сделке этого кошелька
+        # история уже будет.
         history = None
         if self.wallet_history is not None:
-            history = await self.wallet_history.get(trade.maker, now=time.time())
+            history = self.wallet_history.cached(trade.maker)
+            if history is None:
+                self.wallet_history.prefetch(trade.maker)
 
         # 6. Прогнать через детектор
         result = self.detector.evaluate(trade, market, assessment, history=history)

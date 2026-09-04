@@ -123,7 +123,9 @@ class DataApiListener:
                     await asyncio.sleep(cfg.data_api_poll_interval)
                     continue
 
-                trades = await self._fetch_recent_trades(cfg.data_api_batch_limit)
+                trades = await self._fetch_until_checkpoint(
+                    cfg.data_api_batch_limit, cfg.data_api_max_pages
+                )
 
                 # API отдаёт DESC по timestamp; разворачиваем для хронологии.
                 # Фильтруем по checkpoint и дедупу.
@@ -148,9 +150,10 @@ class DataApiListener:
                 # записью пачки мы не увидели. Молча терять их нельзя.
                 if trades and len(fresh) >= len(trades) and self._last_ts > 0:
                     log.warning(
-                        "Выборка забита под потолок (%d из %d новых): между чекпоинтом "
-                        "и пачкой возможны пропуски — увеличь DATA_API_BATCH_LIMIT",
-                        len(fresh), cfg.data_api_batch_limit,
+                        "Исчерпаны все %d страниц по %d, а чекпоинт всё ещё "
+                        "не достигнут: часть сделок за время простоя потеряна. "
+                        "Увеличь DATA_API_MAX_PAGES, если простои частые.",
+                        cfg.data_api_max_pages, cfg.data_api_batch_limit,
                     )
 
                 for t in fresh:
@@ -205,11 +208,40 @@ class DataApiListener:
         except (TypeError, ValueError):
             return None
 
-    async def _fetch_recent_trades(self, limit: int) -> list[Trade]:
+    async def _fetch_until_checkpoint(self, limit: int, max_pages: int) -> list[Trade]:
+        """Догрузить страницы, пока не дойдём до чекпоинта.
+
+        Одна выборка вмещает максимум 10000 сделок — при 20 сделках в секунду
+        это восемь минут. Любая пауза длиннее (перезапуск, сон ноутбука,
+        задержка обработки) делала окно короче разрыва, и всё, что не влезло,
+        отсекалось чекпоинтом молча. Замер показал именно это: база стабильно
+        отставала от API на 8-10 минут и каждый цикл упиралась в потолок.
+
+        Теперь идём назад страницами, пока страница не окажется старше
+        чекпоинта. Ограничение max_pages защищает от бесконечной догрузки
+        после долгого простоя: глубже — данные всё равно потеряны.
+        """
+        collected: list[Trade] = []
+        for page in range(max(1, max_pages)):
+            batch = await self._fetch_recent_trades(limit, offset=page * limit)
+            if not batch:
+                break
+            collected.extend(batch)
+            oldest = min(t.timestamp for t in batch)
+            if oldest <= self._last_ts or len(batch) < limit:
+                break  # дотянулись до чекпоинта либо история кончилась
+            if page + 1 < max(1, max_pages):
+                log.info(
+                    "Догружаю страницу %d: чекпоинт (%d) старше пачки (%d)",
+                    page + 2, self._last_ts, oldest,
+                )
+        return collected
+
+    async def _fetch_recent_trades(self, limit: int, offset: int = 0) -> list[Trade]:
         """Один GET к /trades. Возвращает массив Trade в порядке от API (DESC по ts)."""
         if self._session is None:
             self._session = self._make_session()
-        params = {"limit": str(limit)}
+        params = {"limit": str(limit), "offset": str(offset)}
 
         async with self._session.get(DATA_API_TRADES_URL, params=params) as resp:
             if resp.status != 200:
