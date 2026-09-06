@@ -110,6 +110,17 @@ class Config:
     # Сигнал жизни: без него смерть трекера замечается через сутки (см.
     # heartbeat.py). Порог простоя — 20 минут, это четыре пропущенные
     # пятиминутные пачки Data API подряд.
+    # Подтверждение погоней (см. confirmation.py). Пороги взяты по замеру:
+    # при погоне свыше +15% и деньгах последователей от $2000 перевес
+    # составил +35.7 пп на 88 закрытых исходах.
+    chase_enabled: bool = True
+    chase_window_minutes: float = 20.0
+    chase_min_ratio: float = 0.15
+    chase_min_money_usdc: float = 2000.0
+    # Насколько глубоко в прошлое разбирать неотмеченных кандидатов после
+    # простоя. Дальше смысла нет: рынок уже ушёл.
+    chase_max_age_minutes: float = 180.0
+
     heartbeat_enabled: bool = True
     heartbeat_interval_hours: float = 24.0
     stall_alert_minutes: float = 20.0
@@ -194,6 +205,11 @@ class Config:
             wallet_history_enabled=_bool("WALLET_HISTORY_ENABLED", True),
             wallet_history_ttl_seconds=_float("WALLET_HISTORY_TTL_SECONDS", 6 * 3600),
             wallet_history_concurrency=_int("WALLET_HISTORY_CONCURRENCY", 3),
+            chase_enabled=_bool("CHASE_ENABLED", True),
+            chase_window_minutes=_float("CHASE_WINDOW_MINUTES", 20.0),
+            chase_min_ratio=_float("CHASE_MIN_RATIO", 0.15),
+            chase_min_money_usdc=_float("CHASE_MIN_MONEY_USDC", 2000.0),
+            chase_max_age_minutes=_float("CHASE_MAX_AGE_MINUTES", 180.0),
             heartbeat_enabled=_bool("HEARTBEAT_ENABLED", True),
             heartbeat_interval_hours=_float("HEARTBEAT_INTERVAL_HOURS", 24.0),
             stall_alert_minutes=_float("STALL_ALERT_MINUTES", 20.0),

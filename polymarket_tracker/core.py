@@ -24,6 +24,7 @@ from .storage import Storage
 from .telegram_commands import TelegramCommandHandler
 from .telegram_notifier import TelegramNotifier
 from .wallet_analyzer import WalletAnalyzer
+from .confirmation import ChaseConfirmer
 from .heartbeat import Heartbeat, TrackerStats
 from .wallet_history import WalletHistoryProvider
 from .watchlist import Watchlist
@@ -164,6 +165,12 @@ class PolymarketTracker:
         stats_task = asyncio.create_task(self._stats_loop())
         outcome_task = asyncio.create_task(self.outcome_tracker.run())
         commands_task = asyncio.create_task(self.commands.run())
+        chase_task = (
+            asyncio.create_task(
+                ChaseConfirmer(self.storage, self.notifier, self.config).run()
+            )
+            if self.config.chase_enabled else None
+        )
         heartbeat_task = (
             asyncio.create_task(
                 Heartbeat(self.notifier, self._collect_stats, self.config).run()
@@ -185,8 +192,10 @@ class PolymarketTracker:
             commands_task.cancel()
             if heartbeat_task is not None:
                 heartbeat_task.cancel()
+            if chase_task is not None:
+                chase_task.cancel()
             # Дать задачам корректно завершиться (подавляем CancelledError)
-            for t in (stats_task, outcome_task, commands_task, heartbeat_task):
+            for t in (stats_task, outcome_task, commands_task, heartbeat_task, chase_task):
                 if t is None:
                     continue
                 try:

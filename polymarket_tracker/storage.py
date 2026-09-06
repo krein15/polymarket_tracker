@@ -205,6 +205,11 @@ class Storage:
                 "ALTER TABLE shadow_trades ADD COLUMN score_parts TEXT",
                 # Хедж (покупка обоих исходов) без conditionId не ловится.
                 "ALTER TABLE trades ADD COLUMN condition_id TEXT",
+                # Подтверждение погоней: насколько последователи переплатили
+                # относительно кандидата и сколько денег занесли.
+                "ALTER TABLE shadow_trades ADD COLUMN chase REAL",
+                "ALTER TABLE shadow_trades ADD COLUMN chase_money REAL",
+                "ALTER TABLE shadow_trades ADD COLUMN chase_checked_ts INTEGER",
             ):
                 try:
                     c.execute(ddl)
@@ -365,6 +370,56 @@ class Storage:
                 return True
             except sqlite3.IntegrityError:
                 return False
+
+    def follower_flow(
+        self, token_id: str, exclude_maker: str, since_ts: int, until_ts: int
+    ) -> tuple:
+        """Деньги и средневзвешенная цена ЧУЖИХ покупок после сделки.
+
+        Возвращает (сумма USDC, VWAP). VWAP = 0.0, если следом никто не зашёл.
+        Средневзвешенная, а не средняя: одна мелкая покупка по нелепой цене
+        не должна перевешивать реальный поток.
+        """
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COALESCE(SUM(usdc_amount), 0) AS money, "
+                "       COALESCE(SUM(usdc_amount * price), 0) AS vp "
+                "FROM trades "
+                "WHERE token_id = ? AND ts > ? AND ts <= ? AND side = 'buy' "
+                "  AND maker <> ?",
+                (token_id, since_ts, until_ts, exclude_maker.lower()),
+            ).fetchone()
+        money = float(row["money"] or 0.0)
+        vwap = (float(row["vp"]) / money) if money > 0 else 0.0
+        return money, vwap
+
+    def candidates_awaiting_chase(
+        self, oldest_ts: int, newest_ts: int, limit: int
+    ) -> list:
+        """Кандидаты, у которых окно наблюдения закрылось, а погоня не считана."""
+        with self._conn() as c:
+            return c.execute(
+                "SELECT id, tx_hash, maker, token_id, ts, price, usdc_amount, market_slug "
+                "FROM shadow_trades "
+                "WHERE chase_checked_ts IS NULL AND side = 'buy' "
+                "  AND ts >= ? AND ts <= ? "
+                "ORDER BY ts LIMIT ?",
+                (oldest_ts, newest_ts, limit),
+            ).fetchall()
+
+    def save_chase(
+        self, shadow_id: int, chase, money: float, checked_ts: int
+    ) -> None:
+        """Записать результат проверки погони — в том числе отрицательный.
+
+        Отметку ставим всегда, иначе кандидат будет перепроверяться вечно.
+        """
+        with self._conn() as c:
+            c.execute(
+                "UPDATE shadow_trades SET chase = ?, chase_money = ?, "
+                "chase_checked_ts = ? WHERE id = ?",
+                (chase, money, checked_ts, shadow_id),
+            )
 
     def market_reference_price(
         self, token_id: str, before_ts: int, window_sec: int, min_trades: int = 3
