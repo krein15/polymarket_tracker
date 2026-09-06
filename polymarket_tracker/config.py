@@ -113,6 +113,16 @@ class Config:
     # Подтверждение погоней (см. confirmation.py). Пороги взяты по замеру:
     # при погоне свыше +15% и деньгах последователей от $2000 перевес
     # составил +35.7 пп на 88 закрытых исходах.
+    # Быстрая полоса из блокчейна (см. fast_lane.py). Голова цепочки
+    # отстаёт на ~1 с против 250-380 с у Data API, а в группе "рынок
+    # побежал" за первые пять минут уходит четверть движения.
+    onchain_enabled: bool = False       # включается наличием ALCHEMY_WSS_URL
+    alchemy_wss_url: str = ""
+    alchemy_http_url: str = ""
+    etherscan_api_key: str = ""
+    onchain_min_usdc: float = 5000.0
+    onchain_min_impact: float = 0.20    # тот же порог, что у price_impact
+
     chase_enabled: bool = True
     chase_window_minutes: float = 20.0
     chase_min_ratio: float = 0.15
@@ -205,6 +215,12 @@ class Config:
             wallet_history_enabled=_bool("WALLET_HISTORY_ENABLED", True),
             wallet_history_ttl_seconds=_float("WALLET_HISTORY_TTL_SECONDS", 6 * 3600),
             wallet_history_concurrency=_int("WALLET_HISTORY_CONCURRENCY", 3),
+            alchemy_wss_url=_str("ALCHEMY_WSS_URL", ""),
+            alchemy_http_url=_str("ALCHEMY_HTTP_URL", ""),
+            etherscan_api_key=_str("ETHERSCAN_API_KEY", ""),
+            onchain_enabled=_bool("ONCHAIN_ENABLED", True),
+            onchain_min_usdc=_float("ONCHAIN_MIN_USDC", 5000.0),
+            onchain_min_impact=_float("ONCHAIN_MIN_IMPACT", 0.20),
             chase_enabled=_bool("CHASE_ENABLED", True),
             chase_window_minutes=_float("CHASE_WINDOW_MINUTES", 20.0),
             chase_min_ratio=_float("CHASE_MIN_RATIO", 0.15),

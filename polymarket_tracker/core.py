@@ -24,7 +24,10 @@ from .storage import Storage
 from .telegram_commands import TelegramCommandHandler
 from .telegram_notifier import TelegramNotifier
 from .wallet_analyzer import WalletAnalyzer
+from .config import CTF_EXCHANGE_V2, NEG_RISK_CTF_EXCHANGE_V2
 from .confirmation import ChaseConfirmer
+from .fast_lane import FastLane
+from .onchain_listener import OnchainListener
 from .heartbeat import Heartbeat, TrackerStats
 from .wallet_history import WalletHistoryProvider
 from .watchlist import Watchlist
@@ -101,6 +104,7 @@ class PolymarketTracker:
         self.outcome_market_ctx = MarketContext()
         self.outcome_tracker = OutcomeTracker(self.storage, self.outcome_market_ctx)
         self.commands = TelegramCommandHandler(config, self.storage)
+        self.onchain = None
         # История кошелька из API — снимает холодный старт признаков.
         # Запрашивается только для сделок-кандидатов, с кэшем.
         self.wallet_history = (
@@ -165,6 +169,23 @@ class PolymarketTracker:
         stats_task = asyncio.create_task(self._stats_loop())
         outcome_task = asyncio.create_task(self.outcome_tracker.run())
         commands_task = asyncio.create_task(self.commands.run())
+        # Быстрая полоса включается только при заданном вебсокете: без него
+        # слушать нечего, и трекер работает как раньше.
+        fast_lane_task = None
+        if self.config.onchain_enabled and self.config.alchemy_wss_url:
+            self.onchain = OnchainListener(
+                self.config.alchemy_wss_url,
+                [CTF_EXCHANGE_V2, NEG_RISK_CTF_EXCHANGE_V2],
+                min_usdc=self.config.onchain_min_usdc,
+            )
+            await self.onchain.start()
+            fast_lane_task = asyncio.create_task(
+                FastLane(self.onchain, self.storage, self.market_ctx,
+                         self.notifier, self.config).run()
+            )
+        elif self.config.onchain_enabled:
+            log.info("Быстрая полоса выключена: ALCHEMY_WSS_URL не задан")
+
         chase_task = (
             asyncio.create_task(
                 ChaseConfirmer(self.storage, self.notifier, self.config).run()
@@ -194,8 +215,11 @@ class PolymarketTracker:
                 heartbeat_task.cancel()
             if chase_task is not None:
                 chase_task.cancel()
+            if fast_lane_task is not None:
+                fast_lane_task.cancel()
             # Дать задачам корректно завершиться (подавляем CancelledError)
-            for t in (stats_task, outcome_task, commands_task, heartbeat_task, chase_task):
+            for t in (stats_task, outcome_task, commands_task, heartbeat_task,
+                      chase_task, fast_lane_task):
                 if t is None:
                     continue
                 try:
@@ -206,6 +230,8 @@ class PolymarketTracker:
             await self.outcome_market_ctx.close()
             if self.wallet_history is not None:
                 await self.wallet_history.close()
+            if getattr(self, "onchain", None) is not None:
+                await self.onchain.close()
             await self.listener.close()
             await self.notifier.close()
             await self.commands.close()
