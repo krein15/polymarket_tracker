@@ -421,6 +421,32 @@ class Storage:
                 (chase, money, checked_ts, shadow_id),
             )
 
+    def wallet_track_record(self, maker: str, min_resolved: int = 3) -> Optional[dict]:
+        """Как этот кошелёк отработал по НАШИМ наблюдениям.
+
+        Считаем по теневой выборке: она пишет все крупные покупки подряд,
+        поэтому цифра не отобрана нашими же фильтрами. Возвращает None,
+        пока закрытых исходов меньше min_resolved — по двум сделкам
+        winrate не бывает.
+        """
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*) AS n, "
+                "       AVG(CAST(trader_was_right AS REAL)) AS wr, "
+                "       AVG(roi_if_followed) AS roi "
+                "FROM shadow_trades "
+                "WHERE maker = ? AND market_resolved = 1 "
+                "  AND trader_was_right IS NOT NULL",
+                (maker.lower(),),
+            ).fetchone()
+        if not row or (row["n"] or 0) < min_resolved:
+            return None
+        return {
+            "resolved": int(row["n"]),
+            "winrate": float(row["wr"] or 0.0),
+            "roi": float(row["roi"] or 0.0),
+        }
+
     def market_reference_price(
         self, token_id: str, before_ts: int, window_sec: int, min_trades: int = 3
     ) -> Optional[float]:

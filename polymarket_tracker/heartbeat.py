@@ -75,7 +75,7 @@ def format_digest(s: TrackerStats) -> str:
 
 def format_stall(age_minutes: float) -> str:
     return (
-        f"⚠️ <b>Поток сделок остановился</b>\n"
+        f"<b>Поток сделок остановился</b>\n"
         f"Новых сделок нет {age_minutes:.0f} мин.\n"
         f"Обычная пауза — 5 минут (Data API отдаёт пачками). "
         f"Проверь сеть и консоль трекера."
@@ -112,7 +112,7 @@ class Heartbeat:
                 await self._check_stall(stats, stall_limit)
 
                 if now - self._last_digest >= interval:
-                    await self.notifier.send_status(format_digest(stats))
+                    await self.notifier.send_html(format_digest(stats))
                     self._last_digest = now
             except asyncio.CancelledError:
                 break
@@ -127,10 +127,10 @@ class Heartbeat:
             # Тревогу шлём один раз, а не каждые две минуты.
             if self._stalled_since is None:
                 self._stalled_since = time.time()
-                await self.notifier.send_status(format_stall(age))
+                await self.notifier.send_alert(format_stall(age))
                 log.warning("Поток сделок остановился: %.0f мин без новых", age)
         elif self._stalled_since is not None:
             gap = (time.time() - self._stalled_since) / 60.0
             self._stalled_since = None
-            await self.notifier.send_status(format_recovery(gap))
+            await self.notifier.send_html(format_recovery(gap))
             log.info("Поток восстановился после %.0f мин простоя", gap)

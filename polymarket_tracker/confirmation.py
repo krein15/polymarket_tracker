@@ -170,7 +170,7 @@ class ChaseConfirmer:
             if row["market_slug"] else "https://polymarket.com"
         )
         text = (
-            f"🏃 <b>Рынок пошёл за трейдером</b>\n"
+            f"🟢 <b>ПОГОНЯ · рынок пошёл следом</b>\n"
             f"{row['market_slug'] or '?'}\n\n"
             f"Он взял по <b>{price:.3f}</b> на ${float(row['usdc_amount'] or 0):,.0f}\n"
             f"За {self.config.chase_window_minutes:.0f} мин следом зашло "
@@ -180,5 +180,5 @@ class ChaseConfirmer:
             f"На выборке такие случаи давали перевес +35 пп.\n"
             f'<a href="{url}">Открыть рынок</a>'
         )
-        await self.notifier.send_status(text)
+        await self.notifier.send_html(text)
         log.info("Подтверждение: %s +%.0f%% на $%.0f", row["market_slug"], chase * 100, money)

@@ -98,7 +98,10 @@ class PolymarketTracker:
         self.market_ctx = MarketContext()
         self.wallet_analyzer = WalletAnalyzer(self.storage, config)
         self.detector = AnomalyDetector(config, self.storage, self.watchlist)
-        self.notifier = TelegramNotifier(config.telegram_bot_token, config.telegram_chat_id)
+        self.notifier = TelegramNotifier(
+            config.telegram_bot_token, config.telegram_chat_id,
+            max_per_hour=config.telegram_max_per_hour,
+        )
         # Отдельный MarketContext для outcome_tracker — изолирует HTTP-сессию.
         # Иначе таймаут в одном месте закрывает сессию посреди запроса в другом.
         self.outcome_market_ctx = MarketContext()

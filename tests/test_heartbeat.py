@@ -25,10 +25,21 @@ def stats(last_trade_age_min=5.0):
 
 
 class FakeNotifier:
+    """Двойник нотифаера. Три метода — потому что у сообщений разная природа:
+    служебный текст экранируется, готовая разметка нет, сбои идут красным."""
+
     def __init__(self):
         self.sent = []
 
     async def send_status(self, text):
+        self.sent.append(text)
+        return 1
+
+    async def send_html(self, text):
+        self.sent.append(text)
+        return 1
+
+    async def send_alert(self, text):
         self.sent.append(text)
         return 1
 

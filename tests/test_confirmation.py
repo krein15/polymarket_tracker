@@ -36,10 +36,21 @@ def candidate(storage, price=0.40, usdc=5000.0, ts=NOW):
 
 
 class FakeNotifier:
+    """Двойник нотифаера. Три метода — потому что у сообщений разная природа:
+    служебный текст экранируется, готовая разметка нет, сбои идут красным."""
+
     def __init__(self):
         self.sent = []
 
     async def send_status(self, text):
+        self.sent.append(text)
+        return 1
+
+    async def send_html(self, text):
+        self.sent.append(text)
+        return 1
+
+    async def send_alert(self, text):
         self.sent.append(text)
         return 1
 
@@ -98,7 +109,7 @@ class TestConfirmationPass:
         n = FakeNotifier()
         self._run(storage, n)
         assert len(n.sent) == 1
-        assert "пошёл за трейдером" in n.sent[0]
+        assert "рынок пошёл следом" in n.sent[0]
         assert storage.count_signals() == 1
 
     def test_без_погони_молчим(self, storage):

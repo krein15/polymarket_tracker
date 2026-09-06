@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import html
+import time
+from collections import deque
 import logging
 from typing import Optional
 
@@ -17,9 +19,13 @@ from .anomaly_detector import Signal
 log = logging.getLogger(__name__)
 
 
+# Цвет = срочность и природа сообщения, а не тип ветки:
+#   🟢 обычный сигнал  🟡 ранний (из цепочки)  🔴 сбой
 SIGNAL_ICONS = {
-    "whitelist": "⭐",
-    "score": "🎯",
+    "whitelist": "🟢",
+    "score": "🟢",
+    "onchain_early": "🟡",
+    "chase": "🟢",
     # Legacy-типы: сигналов с ними больше не приходит, оставлены чтобы
     # старые записи в БД рендерились по-человечески.
     "suspicious_entry": "🔍",
@@ -30,9 +36,12 @@ SIGNAL_ICONS = {
 class TelegramNotifier:
     """Простой Telegram Bot API клиент."""
 
-    def __init__(self, bot_token: str, chat_id: str):
+    def __init__(self, bot_token: str, chat_id: str, max_per_hour: int = 15):
         self.bot_token = bot_token
         self.chat_id = chat_id
+        self.max_per_hour = max_per_hour
+        self._sent_times: deque = deque()
+        self._suppressed = 0
         self._session: Optional[aiohttp.ClientSession] = None
         self.base_url = f"https://api.telegram.org/bot{bot_token}"
 
@@ -56,10 +65,46 @@ class TelegramNotifier:
         return await self._send_message(text)
 
     async def send_status(self, text: str) -> Optional[int]:
-        """Служебные сообщения (старт, ошибки, статистика)."""
+        """Служебные сообщения (старт, статистика). Текст экранируется."""
         return await self._send_message(f"ℹ️ <i>{html.escape(text)}</i>")
 
+    async def send_alert(self, text: str) -> Optional[int]:
+        """Сбой, требующий внимания."""
+        return await self._send_message(f"🔴 {text}")
+
+    async def send_html(self, text: str) -> Optional[int]:
+        """Готовая HTML-разметка — БЕЗ экранирования.
+
+        Нужен отдельным методом: send_status экранирует всё подряд, и
+        сообщения, собранные с тегами, приходили с видимыми <b> в тексте.
+        """
+        return await self._send_message(text)
+
+    def _budget_ok(self) -> bool:
+        """Общий потолок сообщений в час — поверх всех веток.
+
+        Пределы в самих ветках уже есть, но каждый охраняет только себя:
+        когда одновременно расшумелись три источника, в чат прилетело
+        64 сообщения за час. Этот предел — последний рубеж, он не зависит
+        от того, какая ветка ошиблась в калибровке.
+        """
+        now = time.time()
+        while self._sent_times and now - self._sent_times[0] > 3600:
+            self._sent_times.popleft()
+        if len(self._sent_times) >= self.max_per_hour:
+            self._suppressed += 1
+            if self._suppressed in (1, 10, 50) or self._suppressed % 100 == 0:
+                log.warning(
+                    "Достигнут потолок %d сообщений в час, подавлено %d",
+                    self.max_per_hour, self._suppressed,
+                )
+            return False
+        self._sent_times.append(now)
+        return True
+
     async def _send_message(self, text: str) -> Optional[int]:
+        if not self._budget_ok():
+            return None
         if self._session is None:
             self._session = self._make_session()
 

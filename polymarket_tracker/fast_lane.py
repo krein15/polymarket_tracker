@@ -33,9 +33,10 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -57,7 +58,19 @@ class FastLane:
         self.notifier = notifier
         self.config = config
         self._seen: OrderedDict = OrderedDict()
-        self.stats = {"seen": 0, "checked": 0, "alerted": 0, "no_reference": 0}
+        self._recent_alerts: deque = deque()
+        self.stats = {"seen": 0, "checked": 0, "alerted": 0,
+                      "no_reference": 0, "near_resolved": 0, "skipped_rate": 0}
+
+    def _rate_ok(self, now: float) -> bool:
+        limit = self.config.onchain_max_per_hour
+        while self._recent_alerts and now - self._recent_alerts[0] > 3600:
+            self._recent_alerts.popleft()
+        if len(self._recent_alerts) >= limit:
+            self.stats["skipped_rate"] += 1
+            return False
+        self._recent_alerts.append(now)
+        return True
 
     async def run(self) -> None:
         cfg = self.config
@@ -106,7 +119,20 @@ class FastLane:
         if impact < cfg.onchain_min_impact:
             return
 
+        # Почти решённый рынок: покупка по 0.999 — это расчёт по уже
+        # известному исходу, а не мнение о будущем. Из 19 первых ранних
+        # сигналов 11 оказались именно такими.
+        if trade.price >= cfg.max_trade_price:
+            self.stats["near_resolved"] += 1
+            return
+
         market = await self.market_ctx.get_by_token_id(trade.token_id)
+        if market is not None and getattr(market, "closed", False):
+            self.stats["near_resolved"] += 1
+            return
+
+        if not self._rate_ok(time.time()):
+            return
         await self._alert(trade, impact, reference, market)
 
     def _remember(self, key) -> None:
@@ -118,6 +144,9 @@ class FastLane:
         self.stats["alerted"] += 1
         slug = getattr(market, "event_slug", "") or getattr(market, "slug", "") or ""
         question = getattr(market, "question", "") or "рынок неизвестен"
+        outcome = getattr(market, "outcome", "") or "?"
+        category = getattr(market, "category", "") or "unknown"
+        volume = getattr(market, "volume_24h", 0.0) or 0.0
         url = f"https://polymarket.com/event/{slug}" if slug else "https://polymarket.com"
 
         reason = (
@@ -138,15 +167,40 @@ class FastLane:
         )
         self.storage.init_outcome_record(signal_id, int(time.time()))
 
-        text = (
-            f"⚡ <b>Ранний сигнал из блокчейна</b>\n"
-            f"{question[:120]}\n\n"
-            f"<b>${trade.usdc_amount:,.0f}</b> по <b>{trade.price:.3f}</b>\n"
-            f"Недавняя цена рынка: {reference:.3f} — переплата <b>+{impact*100:.0f}%</b>\n\n"
-            f"Виден на ~5 минут раньше, чем через Data API. "
-            f"Агрессивный вход: снимал ликвидность, а не ждал.\n"
-            f'<a href="{url}">Открыть рынок</a>'
-        )
-        await self.notifier.send_status(text)
+        maker_short = f"{trade.maker[:8]}..{trade.maker[-4:]}"
+        addr_url = f"https://polygonscan.com/address/{trade.maker}"
+        tx_url = f"https://polygonscan.com/tx/{trade.tx_hash}"
+
+        # Как этот кошелёк отработал по НАШИМ наблюдениям, а не по его словам.
+        record = self.storage.wallet_track_record(trade.maker)
+        if record:
+            track = (f"{record['winrate']*100:.0f}% побед, "
+                     f"ROI {record['roi']*100:+.0f}% "
+                     f"на {record['resolved']} закрытых сделках")
+        else:
+            track = "истории по нему у нас пока нет"
+
+        lines = [
+            "🟡 <b>РАННИЙ · из блокчейна</b> · 📈 BUY",
+            "",
+            f"<b>Рынок:</b> {html.escape(question[:160])}",
+            f"<b>Outcome:</b> {html.escape(str(outcome))} @ {trade.price:.3f}",
+            f"<b>Размер:</b> ${trade.usdc_amount:,.0f} ({trade.shares:,.0f} shares)",
+            "",
+            f"<b>Категория:</b> {html.escape(str(category))} | "
+            f"<b>Volume 24h:</b> ${volume:,.0f}",
+            "",
+            f"<b>Трейдер:</b> <a href=\"{addr_url}\">{maker_short}</a>",
+            f"<i>{html.escape(track)}</i>",
+            "",
+            f"<b>Причина:</b> переплатил <b>+{impact*100:.0f}%</b> к цене последних "
+            f"30 минут ({reference:.3f}) — снимал ликвидность, а не ждал",
+            "",
+            "<i>Виден на ~5 минут раньше, чем через Data API. "
+            "Полная оценка придёт обычным сигналом позже.</i>",
+            "",
+            f'<a href="{url}">Рынок</a> · <a href="{tx_url}">Транзакция</a>',
+        ]
+        await self.notifier.send_html(chr(10).join(lines))
         log.info("Ранний сигнал: $%.0f @ %.3f (+%.0f%%) %s",
                  trade.usdc_amount, trade.price, impact * 100, slug)

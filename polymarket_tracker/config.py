@@ -54,6 +54,10 @@ class Config:
     # Telegram (обязательные)
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    # Общий потолок сообщений в час поверх всех веток. Пределы внутри веток
+    # охраняют только себя: когда расшумелись три сразу, в чат прилетело
+    # 64 сообщения за час.
+    telegram_max_per_hour: int = 15
 
     # Data API (заменили ончейн-листенер)
     data_api_poll_interval: float = 3.0  # сек между запросами к /trades
@@ -121,7 +125,8 @@ class Config:
     alchemy_http_url: str = ""
     etherscan_api_key: str = ""
     onchain_min_usdc: float = 5000.0
-    onchain_min_impact: float = 0.20    # тот же порог, что у price_impact
+    onchain_min_impact: float = 0.20
+    onchain_max_per_hour: int = 4    # тот же порог, что у price_impact
 
     chase_enabled: bool = True
     chase_window_minutes: float = 20.0
@@ -200,6 +205,7 @@ class Config:
         cfg = cls(
             telegram_bot_token=_str("TELEGRAM_BOT_TOKEN", ""),
             telegram_chat_id=_str("TELEGRAM_CHAT_ID", ""),
+            telegram_max_per_hour=_int("TELEGRAM_MAX_PER_HOUR", 15),
             data_api_poll_interval=_float("DATA_API_POLL_INTERVAL", 3.0),
             data_api_batch_limit=_int("DATA_API_BATCH_LIMIT", 200),
             data_api_max_pages=_int("DATA_API_MAX_PAGES", 6),
@@ -227,6 +233,7 @@ class Config:
             onchain_enabled=_bool("ONCHAIN_ENABLED", True),
             onchain_min_usdc=_float("ONCHAIN_MIN_USDC", 5000.0),
             onchain_min_impact=_float("ONCHAIN_MIN_IMPACT", 0.20),
+            onchain_max_per_hour=_int("ONCHAIN_MAX_PER_HOUR", 4),
             chase_enabled=_bool("CHASE_ENABLED", True),
             chase_window_minutes=_float("CHASE_WINDOW_MINUTES", 20.0),
             chase_min_ratio=_float("CHASE_MIN_RATIO", 0.15),
