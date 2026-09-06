@@ -366,6 +366,31 @@ class Storage:
             except sqlite3.IntegrityError:
                 return False
 
+    def market_reference_price(
+        self, token_id: str, before_ts: int, window_sec: int, min_trades: int = 3
+    ) -> Optional[float]:
+        """Медианная цена покупок этого исхода за окно ДО указанного момента.
+
+        Опорная точка для признака "удар по цене": насколько трейдер
+        переплатил относительно того, где рынок только что торговался.
+        Медиана, а не среднее — устойчивее к одиночному выбросу.
+
+        None, если сделок меньше min_trades: по двум точкам опоры не строят.
+        """
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT price FROM trades "
+                "WHERE token_id = ? AND ts >= ? AND ts < ? AND side = 'buy' "
+                "ORDER BY price",
+                (token_id, before_ts - window_sec, before_ts),
+            ).fetchall()
+        if len(rows) < min_trades:
+            return None
+        prices = [float(r["price"]) for r in rows]
+        mid = len(prices) // 2
+        value = prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2.0
+        return value if value > 0 else None
+
     def count_cluster_participants(
         self, token_id: str, since_ts: int, min_usdc: float
     ) -> int:

@@ -23,7 +23,8 @@
                             окно. Именно новых: просто «много участников» —
                             это активность рынка, её уже меряет
                             market_relative.
-    cheap_tail       0..10  вход в дешёвый хвост (<=0.25) — классический
+    price_impact  -15..20  насколько трейдер переплатил относительно цены,
+                           по которой рынок торговался последние полчаса
                             профиль «знал заранее».
     illiquid_market  0..10  абсолютная неликвидность рынка. Раньше была
                             жёстким фильтром, теперь просто слагаемое.
@@ -45,7 +46,7 @@
 новыми выглядят почти все (замер на живой БД: возраст истории 1.4 часа → 95%
 кошельков «новые»), и оба признака давали 35 баллов практически даром. Поэтому
 на молодой БД они не начисляются вовсе, а балл держится на признаках потока —
-market_relative, accumulation, cheap_tail, illiquid_market, — которые считаются
+market_relative, accumulation, price_impact, illiquid_market, — которые считаются
 от объёмов Gamma и надёжны с первого дня. По мере накопления истории признаки
 кошелька включаются сами.
 """
@@ -83,8 +84,18 @@ DORMANT_STEPS = ((90.0, 15), (30.0, 10))
 # cluster: (сколько разных кошельков за окно, баллы)
 CLUSTER_STEPS = ((8, 20), (5, 15), (3, 10))
 
-# cheap_tail: (цена входа не выше, баллы)
-CHEAP_TAIL_STEPS = ((0.15, 10), (0.25, 5))
+# Удар по цене: насколько сделка прошла выше медианы недавних покупок.
+# Пороги взяты не с потолка, а по замеру на 2219 теневых сделках:
+#   переплата > +20%  -> дрейф через час +17.6%, перевес +9.9 пп (n=117)
+#   около нуля        -> дрейф  +0.1%,           перевес -1.8 пп (n=1710)
+#   вход НИЖЕ рынка   -> дрейф -23.5%,           перевес -10.3 пп (n=148)
+# Средние корзины (+3..20%) вели себя несогласованно, поэтому баллов не дают:
+# награждаем только явный эффект.
+PRICE_IMPACT_WINDOW_SEC = 1800
+PRICE_IMPACT_STEPS = ((0.20, 20),)
+# Покупка заметно ниже недавнего рынка — вход против движения, а не знание.
+PRICE_IMPACT_WEAK = -0.03
+PRICE_IMPACT_WEAK_PENALTY = -15
 
 ILLIQUID_POINTS = 10
 
@@ -128,6 +139,9 @@ class Features:
     price: float
     volume_24h: float
     whitelist_tier: str = ""
+    # Насколько сделка прошла выше медианы недавних покупок этого исхода.
+    # None — опорной цены нет (слишком мало сделок до этой).
+    price_impact: Optional[float] = None
     # Признаки кошелька посчитаны по истории из API, а не по локальной базе.
     # Если True — правило холодного старта не применяется: цифры честные
     # с первой же сделки.
@@ -248,6 +262,13 @@ class FeatureExtractor:
         )
 
         cluster_since = trade.timestamp - cfg.cluster_window_seconds
+        reference = self.storage.market_reference_price(
+            trade.token_id, trade.timestamp, PRICE_IMPACT_WINDOW_SEC
+        )
+        price_impact = (
+            (trade.price - reference) / reference if reference else None
+        )
+
         cluster_wallets = self.storage.count_cluster_participants(
             trade.token_id, cluster_since, cfg.cluster_min_participant_usdc
         )
@@ -265,6 +286,7 @@ class FeatureExtractor:
             cluster_all_wallets=cluster_all,
             history_days=self._history_days(trade.timestamp),
             whitelist_tier=whitelist_tier,
+            price_impact=price_impact,
             is_new_wallet=is_new_wallet,
             wallet_from_api=history is not None,
             is_market_maker=self.storage.wallet_traded_both_sides(
@@ -341,10 +363,20 @@ def compute_score(features: Features, config: "Config") -> Score:
         parts["whitelist"] = WHITELIST_WATCH_POINTS
         notes.append("адрес из whitelist (tier=watch)")
 
-    pts = _steps_desc(f.price, CHEAP_TAIL_STEPS)
-    if pts:
-        parts["cheap_tail"] = pts
-        notes.append(f"дешёвый вход @ {f.price:.3f}")
+    if f.price_impact is not None:
+        pts = _steps(f.price_impact, PRICE_IMPACT_STEPS)
+        if pts:
+            parts["price_impact"] = pts
+            notes.append(
+                f"переплатил {f.price_impact*100:+.0f}% к цене последних "
+                f"30 минут — снимал ликвидность, а не ждал"
+            )
+        elif f.price_impact <= PRICE_IMPACT_WEAK:
+            parts["price_impact"] = PRICE_IMPACT_WEAK_PENALTY
+            notes.append(
+                f"взял на {f.price_impact*100:.0f}% НИЖЕ недавнего рынка — "
+                f"вход против движения"
+            )
 
     if 0 < f.volume_24h < config.max_market_volume_24h:
         parts["illiquid_market"] = ILLIQUID_POINTS
@@ -365,10 +397,12 @@ def compute_score(features: Features, config: "Config") -> Score:
     available = (
         MARKET_RELATIVE_STEPS[0][1]   # оборот относительно обычного
         + ACCUMULATION_STEPS[0][1]    # набор позиции частями
-        + CHEAP_TAIL_STEPS[0][1]      # дешёвый хвост
+
         + ILLIQUID_POINTS
         + CLUSTER_STEPS[0][1]         # кластер считается всегда, см. выше
     )
+    if f.price_impact is not None:
+        available += PRICE_IMPACT_STEPS[0][1]
     if wallet_features_ready:
         available += WALLET_NEW_POINTS + DORMANT_STEPS[0][1]
     if f.whitelist_tier == "pass":

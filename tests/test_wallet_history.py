@@ -72,19 +72,19 @@ class TestAvailableMax:
 
     def test_холодный_старт_без_признаков_кошелька(self, config):
         s = compute_score(features(), config)
-        assert s.available_max == 90
+        assert s.available_max == 80
 
     def test_история_из_api_открывает_признаки_кошелька(self, config):
         s = compute_score(features(wallet_from_api=True), config)
-        assert s.available_max == 120
+        assert s.available_max == 110
 
     def test_локальная_история_тоже_открывает(self, config):
         s = compute_score(features(history_days=5.0), config)
-        assert s.available_max == 120
+        assert s.available_max == 110
 
     def test_whitelist_добавляет_свой_потолок(self, config):
         s = compute_score(features(wallet_from_api=True, whitelist_tier="pass"), config)
-        assert s.available_max == 150
+        assert s.available_max == 140
 
     def test_порог_ниже_когда_признаков_меньше(self, config):
         """Иначе фиксированный порог означает «нужен идеальный максимум»."""

@@ -70,9 +70,12 @@ class TestClusterAndPrice:
         assert got == [0, 10, 15, 20]
 
     def test_дешёвый_хвост(self, config):
-        assert compute_score(features(price=0.10), config).parts["cheap_tail"] == 10
-        assert compute_score(features(price=0.22), config).parts["cheap_tail"] == 5
-        assert "cheap_tail" not in compute_score(features(price=0.60), config).parts
+        # Признак цены заменён на удар по цене: сама по себе дешевизна входа
+        # не улика (замер: внутри дешёвой зоны балл не различал победителей).
+        assert compute_score(features(price_impact=0.35), config).parts["price_impact"] == 20
+        assert compute_score(features(price_impact=-0.10), config).parts["price_impact"] == -15
+        assert "price_impact" not in compute_score(features(price_impact=0.10), config).parts
+        assert "price_impact" not in compute_score(features(price_impact=None), config).parts
 
 
 class TestPenalties:
@@ -88,7 +91,7 @@ class TestPenalties:
     def test_почти_решённый_рынок_штрафуется(self, config):
         s = compute_score(features(price=0.97), config)
         assert s.parts["near_resolved"] == -25
-        assert "cheap_tail" not in s.parts
+        assert "price_impact" not in s.parts
 
     def test_без_штрафов_сильный_набор_проходит_порог(self, config):
         f = features(market_relative=10.0, accumulation_trades=6, is_new_wallet=True,
@@ -118,7 +121,7 @@ class TestColdStart:
         f = features(history_days=0.1, market_relative=10.0, price=0.1,
                      volume_24h=1000.0, accumulation_trades=6)
         s = compute_score(f, config)
-        assert set(s.parts) == {"market_relative", "cheap_tail", "illiquid_market", "accumulation"}
+        assert set(s.parts) == {"market_relative", "illiquid_market", "accumulation"}
 
     def test_накопив_историю_признаки_кошелька_включаются(self, config):
         f = lambda days: features(history_days=days, is_new_wallet=True, cluster_wallets=5)
