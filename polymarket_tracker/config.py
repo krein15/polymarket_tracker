@@ -130,6 +130,12 @@ class Config:
     # Насколько глубоко в прошлое разбирать неотмеченных кандидатов после
     # простоя. Дальше смысла нет: рынок уже ушёл.
     chase_max_age_minutes: float = 180.0
+    # Сколько минут считается "свежим": более старых кандидатов разбираем
+    # молча. Иначе перезапуск вываливает всю накопленную очередь разом.
+    chase_fresh_minutes: float = 30.0
+    # Жёсткий предел отправок в час. Страховка от ошибки калибровки: порог,
+    # обещавший 14 сигналов в сутки, на живом потоке дал около 580.
+    chase_max_per_hour: int = 3
 
     heartbeat_enabled: bool = True
     heartbeat_interval_hours: float = 24.0
@@ -226,6 +232,8 @@ class Config:
             chase_min_ratio=_float("CHASE_MIN_RATIO", 0.15),
             chase_min_money_usdc=_float("CHASE_MIN_MONEY_USDC", 2000.0),
             chase_max_age_minutes=_float("CHASE_MAX_AGE_MINUTES", 180.0),
+            chase_fresh_minutes=_float("CHASE_FRESH_MINUTES", 30.0),
+            chase_max_per_hour=_int("CHASE_MAX_PER_HOUR", 3),
             heartbeat_enabled=_bool("HEARTBEAT_ENABLED", True),
             heartbeat_interval_hours=_float("HEARTBEAT_INTERVAL_HOURS", 24.0),
             stall_alert_minutes=_float("STALL_ALERT_MINUTES", 20.0),

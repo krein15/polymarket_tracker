@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -60,7 +61,21 @@ class ChaseConfirmer:
         self.notifier = notifier
         self.config = config
         self.market_ctx = market_ctx
-        self.stats = {"checked": 0, "confirmed": 0}
+        self._recent_alerts: deque = deque()   # отметки времени отправок
+        self.stats = {"checked": 0, "confirmed": 0, "skipped_rate": 0, "backfilled": 0}
+
+    def _rate_ok(self, now: float) -> bool:
+        """Не больше N отправок в час.
+
+        Без этого предела любая ошибка в калибровке порога превращается в
+        поток сообщений: на теневой выборке порог обещал 14 сигналов в
+        сутки, а на живом потоке дал около 580. Предел ограничивает ущерб
+        независимо от того, насколько порог угадан.
+        """
+        limit = self.config.chase_max_per_hour
+        while self._recent_alerts and now - self._recent_alerts[0] > 3600:
+            self._recent_alerts.popleft()
+        return len(self._recent_alerts) < limit
 
     async def run(self) -> None:
         cfg = self.config
@@ -93,6 +108,11 @@ class ChaseConfirmer:
         if not rows:
             return
 
+        # Кандидаты старше "свежего" окна разбираем молча: при перезапуске
+        # в очереди оказываются сотни накопленных строк, и без этого правила
+        # трекер вываливал бы их разом. Рынок по ним всё равно уже ушёл.
+        fresh_after = ready_before - int(cfg.chase_fresh_minutes * 60)
+
         for row in rows:
             money, vwap = self.storage.follower_flow(
                 token_id=row["token_id"],
@@ -109,6 +129,17 @@ class ChaseConfirmer:
                 continue
             if money < cfg.chase_min_money_usdc:
                 continue
+            if row["ts"] < fresh_after:
+                # Разобрали задним числом: в базу записали, но не шумим.
+                self.stats["backfilled"] += 1
+                continue
+            now = time.time()
+            if not self._rate_ok(now):
+                self.stats["skipped_rate"] += 1
+                log.info("Подтверждение пропущено: исчерпан лимит %d в час",
+                         cfg.chase_max_per_hour)
+                continue
+            self._recent_alerts.append(now)
             await self._emit(row, chase, money, vwap)
 
     async def _emit(self, row, chase: float, money: float, vwap: float) -> None:

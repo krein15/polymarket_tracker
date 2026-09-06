@@ -49,6 +49,8 @@ class Cfg:
     chase_min_ratio = 0.15
     chase_min_money_usdc = 2000.0
     chase_max_age_minutes = 180.0
+    chase_fresh_minutes = 180.0   # в тестах шумим по всей очереди
+    chase_max_per_hour = 100
 
 
 class TestFollowerFlow:
@@ -132,3 +134,52 @@ class TestConfirmationPass:
         n = FakeNotifier()
         self._run(storage, n)   # голова данных = NOW+60, окно 20 мин не прошло
         assert n.sent == []
+
+
+class TestVolumeGuards:
+    """Ограничители, добавленные после того, как бот залил Telegram: порог
+    обещал 14 сигналов в сутки, а живой поток дал около 580."""
+
+    def _candidates(self, storage, count, base_ts):
+        for i in range(count):
+            ts = base_ts + i * 10
+            buy(storage, f"0x{i:040x}", 0.40, 5000.0, ts, token_id=f"tok{i}")
+            storage.save_shadow_trade(
+                tx_hash=f"0xc{i}{ts}", maker=f"0x{i:040x}", token_id=f"tok{i}", ts=ts,
+                side="buy", usdc_amount=5000.0, price=0.40, market_slug=f"m{i}",
+                category="politics", volume_24h=10000.0, passed_filters=False,
+                signal_types=None, now_ts=ts, score=50.0, score_parts=None,
+            )
+            buy(storage, "0x" + "e" * 40, 0.60, 9000.0, ts + 300, token_id=f"tok{i}")
+
+    def test_предел_в_час_ограничивает_поток(self, storage):
+        cfg = Cfg(); cfg.chase_max_per_hour = 2
+        self._candidates(storage, 6, NOW)
+        buy(storage, "0x" + "9" * 40, 0.4, 1.0, NOW + 4000, token_id="head")
+        n = FakeNotifier()
+        conf = ChaseConfirmer(storage, n, cfg)
+        asyncio.run(conf._pass())
+        assert len(n.sent) == 2
+        assert conf.stats["skipped_rate"] == 4
+
+    def test_накопленное_разбирается_молча(self, storage):
+        """Старые кандидаты помечаются проверенными, но сообщений не шлют:
+        рынок по ним уже ушёл, а при перезапуске их сотни."""
+        cfg = Cfg(); cfg.chase_fresh_minutes = 5.0
+        self._candidates(storage, 4, NOW)
+        buy(storage, "0x" + "9" * 40, 0.4, 1.0, NOW + 8000, token_id="head")
+        n = FakeNotifier()
+        conf = ChaseConfirmer(storage, n, cfg)
+        asyncio.run(conf._pass())
+        assert n.sent == []
+        assert conf.stats["backfilled"] == 4
+
+    def test_молчаливый_разбор_всё_равно_помечает(self, storage):
+        """Иначе очередь не рассасывается и та же пачка крутится вечно."""
+        cfg = Cfg(); cfg.chase_fresh_minutes = 5.0
+        self._candidates(storage, 3, NOW)
+        buy(storage, "0x" + "9" * 40, 0.4, 1.0, NOW + 8000, token_id="head")
+        conf = ChaseConfirmer(storage, FakeNotifier(), cfg)
+        asyncio.run(conf._pass())
+        asyncio.run(conf._pass())
+        assert conf.stats["checked"] == 3
