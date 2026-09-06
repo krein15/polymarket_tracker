@@ -33,6 +33,24 @@ SIGNAL_ICONS = {
 }
 
 
+def clean_nickname(name: str = "", pseudonym: str = "") -> str:
+    """Читаемое имя трейдера или пустая строка.
+
+    У пользователей без заданного имени Polymarket подставляет в поле name
+    строку вида "0xC41D736b...-1777101352681" — это хуже, чем ничего: она
+    длинная, ничего не сообщает и ломает вид сообщения. Такие отбрасываем
+    и берём псевдоним ("Humble-Socialism"), а если и его нет — молчим.
+    """
+    for candidate in (name, pseudonym):
+        value = (candidate or "").strip()
+        if not value:
+            continue
+        if value.lower().startswith("0x"):
+            continue  # автоген из адреса
+        return value
+    return ""
+
+
 class TelegramNotifier:
     """Простой Telegram Bot API клиент."""
 
@@ -167,17 +185,17 @@ class TelegramNotifier:
         tx_short = f"{s.trade.tx_hash[:10]}..."
 
         # Никнейм трейдера от Data API, если есть
-        pseudonym = getattr(s.trade, "pseudonym", None)
-        user_name = getattr(s.trade, "user_name", None)
-        nickname_str = ""
-        if user_name and user_name.strip():
-            nickname_str = f" ({html.escape(user_name)})"
-        elif pseudonym and pseudonym.strip():
-            nickname_str = f" ({html.escape(pseudonym)})"
+        nick = clean_nickname(
+            getattr(s.trade, "user_name", "") or "",
+            getattr(s.trade, "pseudonym", "") or "",
+        )
+        nickname_str = f" ({html.escape(nick)})" if nick else ""
 
         market_url = s.market.url() if (s.market.event_slug or s.market.slug) else "https://polymarket.com"
         polygonscan_tx = f"https://polygonscan.com/tx/{s.trade.tx_hash}"
-        polygonscan_addr = f"https://polygonscan.com/address/{s.trade.maker}"
+        # Профиль Polymarket, а не адрес в обозревателе: по адресу видно
+        # только переводы, а по профилю — что человек торгует и как.
+        profile_url = f"https://polymarket.com/profile/{s.trade.maker}"
 
         lines = [
             f"{icon} <b>{type_label}</b> · {side_label}",
@@ -189,7 +207,7 @@ class TelegramNotifier:
             f"<b>Категория:</b> {html.escape(s.market.category or 'unknown')} | "
             f"<b>Volume 24h:</b> ${s.market.volume_24h:,.0f}",
             "",
-            f"<b>Трейдер:</b> <a href=\"{polygonscan_addr}\">{maker_short}</a>{nickname_str}",
+            f"<b>Трейдер:</b> <a href=\"{profile_url}\">{maker_short}</a>{nickname_str}",
             f"<i>{html.escape(s.wallet.reason)}</i>",
             "",
             f"<b>Причина:</b> {reason}",

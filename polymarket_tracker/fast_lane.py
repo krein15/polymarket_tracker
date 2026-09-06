@@ -36,8 +36,12 @@ import asyncio
 import html
 import logging
 import time
+
+import aiohttp
 from collections import OrderedDict, deque
 from typing import Optional
+
+from .telegram_notifier import clean_nickname
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +50,12 @@ SEEN_LIMIT = 5000
 
 # Окно для опорной цены — то же, что у признака price_impact в скоринге.
 REFERENCE_WINDOW_SEC = 1800
+
+# Ник трейдера у Data API. В логе цепочки его нет — там только адрес, а по
+# адресу не понять, кто это. Запрос делается ТОЛЬКО на отправку сигнала
+# (несколько раз в час), поэтому на скорость полосы не влияет.
+NICKNAME_URL = "https://data-api.polymarket.com/trades"
+NICKNAME_TIMEOUT_SEC = 6
 
 
 class FastLane:
@@ -135,6 +145,22 @@ class FastLane:
             return
         await self._alert(trade, impact, reference, market)
 
+    async def _fetch_nickname(self, maker: str) -> str:
+        """Ник трейдера или пустая строка. Ошибку глушим: без ника сигнал
+        остаётся полезным, а задерживать отправку из-за неё незачем."""
+        try:
+            timeout = aiohttp.ClientTimeout(total=NICKNAME_TIMEOUT_SEC)
+            async with aiohttp.ClientSession(timeout=timeout) as s:
+                async with s.get(NICKNAME_URL, params={"user": maker, "limit": "1"}) as r:
+                    if r.status != 200:
+                        return ""
+                    data = await r.json()
+        except Exception:  # noqa: BLE001
+            return ""
+        if not isinstance(data, list) or not data:
+            return ""
+        return clean_nickname(data[0].get("name") or "", data[0].get("pseudonym") or "")
+
     def _remember(self, key) -> None:
         self._seen[key] = True
         while len(self._seen) > SEEN_LIMIT:
@@ -168,8 +194,11 @@ class FastLane:
         self.storage.init_outcome_record(signal_id, int(time.time()))
 
         maker_short = f"{trade.maker[:8]}..{trade.maker[-4:]}"
-        addr_url = f"https://polygonscan.com/address/{trade.maker}"
+        profile_url = f"https://polymarket.com/profile/{trade.maker}"
         tx_url = f"https://polygonscan.com/tx/{trade.tx_hash}"
+
+        nick = await self._fetch_nickname(trade.maker)
+        nickname = f" ({html.escape(nick)})" if nick else ""
 
         # Как этот кошелёк отработал по НАШИМ наблюдениям, а не по его словам.
         record = self.storage.wallet_track_record(trade.maker)
@@ -190,7 +219,7 @@ class FastLane:
             f"<b>Категория:</b> {html.escape(str(category))} | "
             f"<b>Volume 24h:</b> ${volume:,.0f}",
             "",
-            f"<b>Трейдер:</b> <a href=\"{addr_url}\">{maker_short}</a>",
+            f"<b>Трейдер:</b> <a href=\"{profile_url}\">{maker_short}</a>{nickname}",
             f"<i>{html.escape(track)}</i>",
             "",
             f"<b>Причина:</b> переплатил <b>+{impact*100:.0f}%</b> к цене последних "
