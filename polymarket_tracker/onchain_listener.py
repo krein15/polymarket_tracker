@@ -56,9 +56,15 @@ import aiohttp
 
 log = logging.getLogger(__name__)
 
-# Определено по структуре события, а не по хешу: у OrderFilled три
-# индексных поля (4 темы) и семь слов данных. Проверено на живом потоке —
-# из трёх типов событий контракта только это имеет такую форму.
+# Полный хеш подписи OrderFilled — снят с живого лога контракта. Нужен
+# именно полный: по нему узел фильтрует поток НА СВОЕЙ стороне, а мы
+# получаем вдвое меньше данных.
+#
+# Почему это оказалось важно: первая версия подписывалась на ВСЕ события
+# двух контрактов — 57 штук в секунду, 4.9 млн в сутки, при том что
+# полезных (покупка от $5000) около 55 в час. Полезная доля 0.03%.
+# Месячная квота Alchemy сгорела за сутки.
+ORDER_FILLED_TOPIC = "0xd543adfd945773f1a62f74f0ee55a5e3b9b1a28262980ba90b1a89f2ea84d8ee"
 ORDER_FILLED_PREFIX = "0xd543adfd"
 ORDER_FILLED_TOPICS = 4
 ORDER_FILLED_WORDS = 7
@@ -148,8 +154,14 @@ def decode_order_filled(log_entry: dict, seen_at: Optional[float] = None) -> Opt
 class OnchainListener:
     """Подписка на OrderFilled обоих контрактов через вебсокет."""
 
-    def __init__(self, wss_url: str, addresses: list, min_usdc: float = 0.0):
-        self.wss_url = wss_url
+    def __init__(self, wss_url, addresses: list, min_usdc: float = 0.0):
+        # Несколько адресов узлов: публичные шлюзы иногда отваливаются, и
+        # переключение на запасной надёжнее, чем ждать одного.
+        if isinstance(wss_url, str):
+            self.wss_urls = [u.strip() for u in wss_url.split(",") if u.strip()]
+        else:
+            self.wss_urls = list(wss_url)
+        self._url_index = 0
         self.addresses = [a.lower() for a in addresses]
         self.min_usdc = min_usdc
         self._session: Optional[aiohttp.ClientSession] = None
@@ -181,9 +193,11 @@ class OnchainListener:
                 raise
             except Exception as e:  # noqa: BLE001 — обрыв связи не должен ронять трекер
                 self.stats["reconnects"] += 1
+                # Следующая попытка — уже к другому узлу.
+                self._url_index = (self._url_index + 1) % len(self.wss_urls)
                 log.warning(
-                    "Ончейн-подписка оборвалась (%s), переподключаюсь через %.0f с",
-                    type(e).__name__, backoff,
+                    "Ончейн-подписка оборвалась (%s), переключаюсь на %s через %.0f с",
+                    type(e).__name__, self.wss_urls[self._url_index], backoff,
                 )
             await asyncio.sleep(backoff)
             backoff = min(RECONNECT_MAX_SEC, backoff * 2)
@@ -191,13 +205,18 @@ class OnchainListener:
     async def _stream_once(self) -> AsyncIterator[OnchainTrade]:
         if self._session is None or self._session.closed:
             await self.start()
-        async with self._session.ws_connect(self.wss_url, heartbeat=30) as ws:
+        url = self.wss_urls[self._url_index]
+        async with self._session.ws_connect(url, heartbeat=30) as ws:
             for i, address in enumerate(self.addresses):
                 await ws.send_json({
                     "jsonrpc": "2.0", "id": i + 1, "method": "eth_subscribe",
-                    "params": ["logs", {"address": address}],
+                    # Фильтр по теме — на стороне узла: без него прилетают все
+                    # события контракта, а нужен один тип из трёх.
+                    "params": ["logs", {"address": address,
+                                        "topics": [ORDER_FILLED_TOPIC]}],
                 })
-            log.info("Ончейн-подписка оформлена на %d контракта(ов)", len(self.addresses))
+            log.info("Ончейн-подписка: %d контракта(ов) через %s",
+                     len(self.addresses), url)
 
             async for msg in ws:
                 if msg.type != aiohttp.WSMsgType.TEXT:

@@ -121,6 +121,12 @@ class Config:
     # отстаёт на ~1 с против 250-380 с у Data API, а в группе "рынок
     # побежал" за первые пять минут уходит четверть движения.
     onchain_enabled: bool = False       # включается наличием ALCHEMY_WSS_URL
+    # Узлы для потока сделок. По умолчанию бесплатные публичные: поток
+    # тяжёлый по объёму и дешёвый по ценности, платить за него незачем.
+    # Alchemy бережём для архивных запросов, где он незаменим.
+    onchain_wss_urls: str = (
+        "wss://polygon-bor-rpc.publicnode.com,wss://polygon.drpc.org"
+    )
     alchemy_wss_url: str = ""
     alchemy_http_url: str = ""
     etherscan_api_key: str = ""
@@ -227,6 +233,10 @@ class Config:
             wallet_history_enabled=_bool("WALLET_HISTORY_ENABLED", True),
             wallet_history_ttl_seconds=_float("WALLET_HISTORY_TTL_SECONDS", 6 * 3600),
             wallet_history_concurrency=_int("WALLET_HISTORY_CONCURRENCY", 3),
+            onchain_wss_urls=_str(
+                "ONCHAIN_WSS_URLS",
+                "wss://polygon-bor-rpc.publicnode.com,wss://polygon.drpc.org",
+            ),
             alchemy_wss_url=_str("ALCHEMY_WSS_URL", ""),
             alchemy_http_url=_str("ALCHEMY_HTTP_URL", ""),
             etherscan_api_key=_str("ETHERSCAN_API_KEY", ""),

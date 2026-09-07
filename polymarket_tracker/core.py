@@ -175,9 +175,9 @@ class PolymarketTracker:
         # Быстрая полоса включается только при заданном вебсокете: без него
         # слушать нечего, и трекер работает как раньше.
         fast_lane_task = None
-        if self.config.onchain_enabled and self.config.alchemy_wss_url:
+        if self.config.onchain_enabled and self.config.onchain_wss_urls:
             self.onchain = OnchainListener(
-                self.config.alchemy_wss_url,
+                self.config.onchain_wss_urls,
                 [CTF_EXCHANGE_V2, NEG_RISK_CTF_EXCHANGE_V2],
                 min_usdc=self.config.onchain_min_usdc,
             )
@@ -187,7 +187,7 @@ class PolymarketTracker:
                          self.notifier, self.config).run()
             )
         elif self.config.onchain_enabled:
-            log.info("Быстрая полоса выключена: ALCHEMY_WSS_URL не задан")
+            log.info("Быстрая полоса выключена: ONCHAIN_WSS_URLS не задан")
 
         chase_task = (
             asyncio.create_task(
