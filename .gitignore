@@ -43,6 +43,9 @@ build/
 .DS_Store
 Thumbs.db
 
+# ── Результат замера источников: выводится из БД, у каждого свой.
+data/funders.json
+
 # ── Логи ──
 *.log
 logs/
