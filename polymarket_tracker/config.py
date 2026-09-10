@@ -156,6 +156,13 @@ class Config:
     # вытесняться подтверждениями из общей квоты.
     chase_retract_max_per_hour: int = 3
 
+    # Замер достижимой цены входа. Задержка — оценка времени реакции
+    # человека: увидеть сообщение, открыть рынок, нажать. Снимать раньше
+    # нечестно, а без замера любой подсчёт прибыли остаётся самообманом:
+    # прежние +44% ROI считались от цены трейдера, а не от нашей.
+    entry_price_enabled: bool = True
+    entry_delay_sec: int = 120
+
     heartbeat_enabled: bool = True
     heartbeat_interval_hours: float = 24.0
     stall_alert_minutes: float = 20.0
@@ -261,6 +268,8 @@ class Config:
             chase_max_per_hour=_int("CHASE_MAX_PER_HOUR", 3),
             chase_retract_ratio=_float("CHASE_RETRACT_RATIO", -0.15),
             chase_retract_max_per_hour=_int("CHASE_RETRACT_MAX_PER_HOUR", 3),
+            entry_price_enabled=_bool("ENTRY_PRICE_ENABLED", True),
+            entry_delay_sec=_int("ENTRY_DELAY_SEC", 120),
             heartbeat_enabled=_bool("HEARTBEAT_ENABLED", True),
             heartbeat_interval_hours=_float("HEARTBEAT_INTERVAL_HOURS", 24.0),
             stall_alert_minutes=_float("STALL_ALERT_MINUTES", 20.0),

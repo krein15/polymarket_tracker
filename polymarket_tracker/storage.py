@@ -61,6 +61,22 @@ CREATE INDEX IF NOT EXISTS idx_signals_ts ON signals(ts);
 -- Отбой ищет по сделке, был ли по ней уже отправлен сигнал.
 CREATE INDEX IF NOT EXISTS idx_signals_tx ON signals(tx_hash);
 
+-- Цена, по которой мы РЕАЛЬНО могли бы войти по сигналу.
+--
+-- Отдельная таблица, а не колонки в signals: замер добавился поздно, у
+-- старых сигналов его нет и не будет, и путать "не мерили" с "не налилось"
+-- нельзя. Плюс signals остаётся нетронутой.
+CREATE TABLE IF NOT EXISTS signal_entries (
+    signal_id INTEGER PRIMARY KEY,
+    measured_ts INTEGER NOT NULL,
+    delay_sec INTEGER NOT NULL,
+    best_ask REAL,
+    fill_500 REAL,
+    fill_2000 REAL,
+    fill_5000 REAL,
+    depth_usdc REAL
+);
+
 CREATE TABLE IF NOT EXISTS checkpoint (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -430,6 +446,46 @@ class Storage:
                 "ORDER BY ts LIMIT ?",
                 (oldest_ts, newest_ts, limit),
             ).fetchall()
+
+    def signals_awaiting_entry(
+        self, ready_before: int, oldest: int, limit: int
+    ) -> list:
+        """Сигналы, у которых пора снять цену входа, а замера ещё нет.
+
+        Нижняя граница по времени нужна после простоя: цену получасовой
+        давности снимать бессмысленно, а очередь иначе не рассасывается.
+        """
+        with self._conn() as c:
+            return c.execute(
+                "SELECT s.id, s.ts, s.token_id, s.price, s.signal_type "
+                "FROM signals s LEFT JOIN signal_entries e ON e.signal_id = s.id "
+                "WHERE e.signal_id IS NULL AND s.ts <= ? AND s.ts >= ? "
+                "ORDER BY s.ts LIMIT ?",
+                (ready_before, oldest, limit),
+            ).fetchall()
+
+    def save_signal_entry(
+        self,
+        signal_id: int,
+        measured_ts: int,
+        delay_sec: int,
+        best_ask: Optional[float],
+        fill_500: Optional[float],
+        fill_2000: Optional[float],
+        fill_5000: Optional[float],
+        depth_usdc: Optional[float],
+    ) -> None:
+        """Записать замер. Пустые цены — это тоже результат: значит стакан
+        был слишком тонким, чтобы налить такой объём."""
+        with self._conn() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO signal_entries "
+                "(signal_id, measured_ts, delay_sec, best_ask, "
+                " fill_500, fill_2000, fill_5000, depth_usdc) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (signal_id, measured_ts, delay_sec, best_ask,
+                 fill_500, fill_2000, fill_5000, depth_usdc),
+            )
 
     def sent_signal_for_trade(self, tx_hash: str):
         """Сигнал, уже отправленный по этой сделке, или None.

@@ -26,6 +26,7 @@ from .telegram_notifier import TelegramNotifier
 from .wallet_analyzer import WalletAnalyzer
 from .config import CTF_EXCHANGE_V2, NEG_RISK_CTF_EXCHANGE_V2
 from .confirmation import ChaseConfirmer
+from .entry_price import EntryPriceTracker
 from .fast_lane import FastLane
 from .onchain_listener import OnchainListener
 from .heartbeat import Heartbeat, TrackerStats
@@ -195,6 +196,12 @@ class PolymarketTracker:
             )
             if self.config.chase_enabled else None
         )
+        entry_task = (
+            asyncio.create_task(
+                EntryPriceTracker(self.storage, self.config).run()
+            )
+            if self.config.entry_price_enabled else None
+        )
         heartbeat_task = (
             asyncio.create_task(
                 Heartbeat(self.notifier, self._collect_stats, self.config).run()
@@ -220,9 +227,11 @@ class PolymarketTracker:
                 chase_task.cancel()
             if fast_lane_task is not None:
                 fast_lane_task.cancel()
+            if entry_task is not None:
+                entry_task.cancel()
             # Дать задачам корректно завершиться (подавляем CancelledError)
             for t in (stats_task, outcome_task, commands_task, heartbeat_task,
-                      chase_task, fast_lane_task):
+                      chase_task, fast_lane_task, entry_task):
                 if t is None:
                     continue
                 try:
