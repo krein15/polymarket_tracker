@@ -30,5 +30,7 @@ if not exist ".env" (
 )
 
 call .venv\Scripts\activate.bat
-python tracker_main.py
+REM Надзиратель поднимает трекер обратно, если тот упал: 09-10.09
+REM простой в сутки заметили только по логам. Ctrl+C завершает и его.
+python tools\supervise.py
 if not defined QUIET pause
