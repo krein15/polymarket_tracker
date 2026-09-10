@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS signals (
     user_feedback TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_signals_ts ON signals(ts);
+-- Отбой ищет по сделке, был ли по ней уже отправлен сигнал.
+CREATE INDEX IF NOT EXISTS idx_signals_tx ON signals(tx_hash);
 
 CREATE TABLE IF NOT EXISTS checkpoint (
     key TEXT PRIMARY KEY,
@@ -406,6 +408,28 @@ class Storage:
                 "ORDER BY ts LIMIT ?",
                 (oldest_ts, newest_ts, limit),
             ).fetchall()
+
+    def sent_signal_for_trade(self, tx_hash: str):
+        """Сигнал, уже отправленный по этой сделке, или None.
+
+        Нужен отбою: сообщать "рынок пошёл против" имеет смысл только по
+        тем сделкам, о которых мы уже написали. Про остальные мы молчали —
+        и молчать надо дальше, иначе отбой сам станет потоком сигналов.
+
+        Ранние ончейн-сигналы и подтверждения сюда не попадают: первые
+        приходят раньше, чем окно погони вообще закрылось, вторые — это
+        уже вывод по той же самой погоне.
+        """
+        if not tx_hash:
+            return None
+        with self._conn() as c:
+            return c.execute(
+                "SELECT id, signal_type, ts, market_slug, price, usdc_amount, maker "
+                "FROM signals WHERE tx_hash = ? "
+                "  AND (signal_type = 'score' OR signal_type = 'whitelist') "
+                "ORDER BY ts LIMIT 1",
+                (tx_hash,),
+            ).fetchone()
 
     def save_chase(
         self, shadow_id: int, chase, money: float, checked_ts: int

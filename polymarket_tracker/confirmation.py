@@ -62,9 +62,12 @@ class ChaseConfirmer:
         self.config = config
         self.market_ctx = market_ctx
         self._recent_alerts: deque = deque()   # отметки времени отправок
-        self.stats = {"checked": 0, "confirmed": 0, "skipped_rate": 0, "backfilled": 0}
+        self._recent_retracts: deque = deque()
+        self.stats = {"checked": 0, "confirmed": 0, "skipped_rate": 0,
+                      "backfilled": 0, "retracted": 0}
 
-    def _rate_ok(self, now: float) -> bool:
+    def _rate_ok(self, now: float, queue: Optional[deque] = None,
+                 limit: Optional[int] = None) -> bool:
         """Не больше N отправок в час.
 
         Без этого предела любая ошибка в калибровке порога превращается в
@@ -72,10 +75,11 @@ class ChaseConfirmer:
         сутки, а на живом потоке дал около 580. Предел ограничивает ущерб
         независимо от того, насколько порог угадан.
         """
-        limit = self.config.chase_max_per_hour
-        while self._recent_alerts and now - self._recent_alerts[0] > 3600:
-            self._recent_alerts.popleft()
-        return len(self._recent_alerts) < limit
+        queue = self._recent_alerts if queue is None else queue
+        limit = self.config.chase_max_per_hour if limit is None else limit
+        while queue and now - queue[0] > 3600:
+            queue.popleft()
+        return len(queue) < limit
 
     async def run(self) -> None:
         cfg = self.config
@@ -125,7 +129,12 @@ class ChaseConfirmer:
             self.storage.save_chase(row["id"], chase, money, int(time.time()))
             self.stats["checked"] += 1
 
-            if chase is None or chase < cfg.chase_min_ratio:
+            if chase is None:
+                continue
+            if chase <= cfg.chase_retract_ratio:
+                await self._maybe_retract(row, chase, money, vwap, fresh_after)
+                continue
+            if chase < cfg.chase_min_ratio:
                 continue
             if money < cfg.chase_min_money_usdc:
                 continue
@@ -141,6 +150,58 @@ class ChaseConfirmer:
                 continue
             self._recent_alerts.append(now)
             await self._emit(row, chase, money, vwap)
+
+    async def _maybe_retract(self, row, chase: float, money: float,
+                             vwap: float, fresh_after: int) -> None:
+        """Отбой по сигналу, который мы уже отправили.
+
+        Зеркало подтверждения: если следом за трейдером деньги пошли по
+        цене НИЖЕ его, он с большой вероятностью не прав. На 4985 сделках
+        с посчитанной погоней:
+
+            рынок пошёл за ним (>= +15%)   n=394   перевес +25.0 пп, ROI +50.4%
+            рынок пошёл против (<= -15%)   n=306   перевес -29.0 пп, ROI -54.0%
+
+        А среди сделок, по которым мы РЕАЛЬНО отправили сигнал, отбойная
+        группа ещё хуже: винрейт 21.4% при безубытке 53.2%, ROI -60.4%.
+
+        Почему только по отправленным. Про остальные мы молчали, и отбой по
+        ним был бы сообщением о том, чего пользователь не видел, — а это
+        два десятка сообщений в сутки вместо одного.
+        """
+        sent = self.storage.sent_signal_for_trade(row["tx_hash"])
+        if sent is None:
+            return
+        if row["ts"] < fresh_after:
+            return  # накопленное после простоя разбираем молча, как и всё прочее
+        now = time.time()
+        if not self._rate_ok(now, self._recent_retracts,
+                             self.config.chase_retract_max_per_hour):
+            self.stats["skipped_rate"] += 1
+            return
+        self._recent_retracts.append(now)
+
+        self.stats["retracted"] += 1
+        price = float(row["price"] or 0)
+        slug = row["market_slug"] or sent["market_slug"] or ""
+        url = f"https://polymarket.com/event/{slug}" if slug else "https://polymarket.com"
+        lines = [
+            "🔴 <b>ОТБОЙ · рынок пошёл против него</b>",
+            slug or '?',
+            "",
+            f"Мы дали сигнал: вход по <b>{price:.3f}</b> "
+            f"на ${float(row['usdc_amount'] or 0):,.0f}",
+            f"За {self.config.chase_window_minutes:.0f} мин следом зашло "
+            f"<b>${money:,.0f}</b> по средней <b>{vwap:.3f}</b> "
+            f"(<b>{chase*100:.0f}%</b> к его цене)",
+            "",
+            "Рынок закладывает исход дешевле, чем он купил. На выборке такие "
+            "сделки давали винрейт 21% при безубытке 53% и ROI -60%.",
+            f'<a href="{url}">Открыть рынок</a>',
+        ]
+        text = chr(10).join(lines)
+        await self.notifier.send_alert(text)
+        log.info("Отбой: %s %.0f%% на $%.0f", slug, chase * 100, money)
 
     async def _emit(self, row, chase: float, money: float, vwap: float) -> None:
         """Записать подтверждение и отправить сообщение."""

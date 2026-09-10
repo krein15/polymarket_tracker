@@ -147,6 +147,14 @@ class Config:
     # Жёсткий предел отправок в час. Страховка от ошибки калибровки: порог,
     # обещавший 14 сигналов в сутки, на живом потоке дал около 580.
     chase_max_per_hour: int = 3
+    # Отбой: рынок пошёл ПРОТИВ трейдера. Зеркало подтверждения и по порогу,
+    # и по силе — на 4985 сделках группа chase <= -15% даёт перевес -29.0 пп
+    # и ROI -54%. Фильтра по деньгам здесь нет намеренно: он ослабляет
+    # признак (-29.0 пп без фильтра против -13.5 пп при пороге $5000).
+    chase_retract_ratio: float = -0.15
+    # Отдельный предел: отбоев около одного в сутки, и они не должны
+    # вытесняться подтверждениями из общей квоты.
+    chase_retract_max_per_hour: int = 3
 
     heartbeat_enabled: bool = True
     heartbeat_interval_hours: float = 24.0
@@ -251,6 +259,8 @@ class Config:
             chase_max_age_minutes=_float("CHASE_MAX_AGE_MINUTES", 180.0),
             chase_fresh_minutes=_float("CHASE_FRESH_MINUTES", 30.0),
             chase_max_per_hour=_int("CHASE_MAX_PER_HOUR", 3),
+            chase_retract_ratio=_float("CHASE_RETRACT_RATIO", -0.15),
+            chase_retract_max_per_hour=_int("CHASE_RETRACT_MAX_PER_HOUR", 3),
             heartbeat_enabled=_bool("HEARTBEAT_ENABLED", True),
             heartbeat_interval_hours=_float("HEARTBEAT_INTERVAL_HOURS", 24.0),
             stall_alert_minutes=_float("STALL_ALERT_MINUTES", 20.0),

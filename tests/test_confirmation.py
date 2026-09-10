@@ -62,6 +62,8 @@ class Cfg:
     chase_max_age_minutes = 180.0
     chase_fresh_minutes = 180.0   # в тестах шумим по всей очереди
     chase_max_per_hour = 100
+    chase_retract_ratio = -0.15
+    chase_retract_max_per_hour = 100
 
 
 class TestFollowerFlow:
