@@ -154,6 +154,28 @@ COMMIT_EVERY = 50
 COMMIT_INTERVAL_SEC = 2.0
 
 
+# Насколько поздно ещё можно взять снимок цены "через час".
+#
+# Снимок, снятый через десять дней, называется price_1h, но числом является
+# совсем другим — и молча портит любой замер дрейфа. Поэтому просроченные
+# сверх этого срока не берём вовсе: честный пропуск лучше тихой подмены.
+# Допуск равен самому окну (для часа — до двух часов), это компромисс между
+# точностью и объёмом собранных данных.
+SNAPSHOT_GRACE_FACTOR = 2
+
+_SHADOW_FIELDS = """
+    id AS shadow_id,
+    token_id,
+    side,
+    price AS price_at_signal,
+    ts AS signal_ts,
+    last_checked_ts,
+    (price_1h IS NOT NULL) AS has_price_1h,
+    (price_24h IS NOT NULL) AS has_price_24h,
+    (price_7d IS NOT NULL) AS has_price_7d
+"""
+
+
 class Storage:
     """SQLite-хранилище: одно долгоживущее соединение, отложенный коммит.
 
@@ -1000,27 +1022,69 @@ class Storage:
             except sqlite3.IntegrityError:
                 return False
 
-    def get_shadow_to_update(self, limit: int = 100) -> list[dict]:
+    def get_shadow_to_update(
+        self, limit: int = 100, now_ts: Optional[int] = None
+    ) -> list[dict]:
         """Незакрытые shadow-сделки для проверки резолва.
 
         Ключи dict-ов совместимы с get_outcomes_to_update (id назван
         shadow_id, цена входа — price_at_signal, ts сделки — signal_ts),
         чтобы outcome_tracker мог переиспользовать общий обработчик батча.
-        Сортировка: дольше всех не проверявшиеся первыми.
+
+        Очередь делится пополам, и вот почему
+        -------------------------------------
+        Раньше был чистый LRU — "дольше всех не проверявшиеся первыми". У
+        свежей сделки last_checked_ts почти сейчас, поэтому она уходила в
+        самый хвост очереди, а впереди стояли тысячи старых. Час истекал
+        раньше, чем до неё доходил черёд; если за это время рынок успевал
+        закрыться, снимок цены через час не брался уже никогда.
+
+        Видно по данным: чем быстрее закрывается рынок, тем реже у сделки
+        есть price_1h.
+
+            рынок закрылся < 1 часа     726 сделок,  снимок есть у   0.0%
+            1-3 часа                    435                          1.8%
+            3-12 часов                 9992                         12.7%
+            12-48 часов                6512                         35.0%
+            больше 2 суток              507                         98.4%
+
+        Для рынков быстрее часа снимка и не может быть. Но 3-12 часов живут
+        заметно дольше часа — там 12.7% это уже потеря, причём смещённая:
+        замеры дрейфа считались почти только по медленным рынкам, тогда как
+        поток трекера — это быстрый спорт.
+
+        Просроченные берутся только пока снимок ещё имеет смысл
+        (SNAPSHOT_GRACE_FACTOR): иначе длинный хвост безнадёжно старых строк
+        снова вытеснил бы свежие — ровно та беда, которую чиним.
+
+        Поэтому половина батча отдаётся строкам, у которых снимок ПРОСРОЧЕН,
+        и лишь вторая половина — обычному LRU. Нагрузка на Gamma та же:
+        меняется только порядок, а не число запросов. Делить нужно именно
+        пополам: отдать всю квоту просрочке значило бы остановить проверку
+        резолва, пока разбирается накопленный хвост.
         """
+        # Момент отсчёта берём сами: у парного метода для боевых сигналов
+        # такого параметра нет, а общий обработчик зовёт оба одинаково.
+        now_ts = int(time.time()) if now_ts is None else now_ts
+        half = max(1, limit // 2)
         with self._conn() as c:
-            rows = c.execute(
+            overdue = c.execute(
                 """
-                SELECT
-                    id AS shadow_id,
-                    token_id,
-                    side,
-                    price AS price_at_signal,
-                    ts AS signal_ts,
-                    last_checked_ts,
-                    (price_1h IS NOT NULL) AS has_price_1h,
-                    (price_24h IS NOT NULL) AS has_price_24h,
-                    (price_7d IS NOT NULL) AS has_price_7d
+                SELECT """ + _SHADOW_FIELDS + """
+                FROM shadow_trades
+                WHERE market_resolved = 0
+                  AND price_1h IS NULL
+                  AND ? - ts >= 3600
+                  AND ? - ts <= 3600 * ?
+                ORDER BY ts ASC
+                LIMIT ?
+                """,
+                (now_ts, now_ts, SNAPSHOT_GRACE_FACTOR, half),
+            ).fetchall()
+            seen = {r["shadow_id"] for r in overdue}
+            rest = c.execute(
+                """
+                SELECT """ + _SHADOW_FIELDS + """
                 FROM shadow_trades
                 WHERE market_resolved = 0
                 ORDER BY
@@ -1030,7 +1094,13 @@ class Storage:
                 """,
                 (limit,),
             ).fetchall()
-            return [dict(r) for r in rows]
+        out = [dict(r) for r in overdue]
+        for r in rest:
+            if len(out) >= limit:
+                break
+            if r["shadow_id"] not in seen:
+                out.append(dict(r))
+        return out
 
     def update_shadow_snapshots(
         self,

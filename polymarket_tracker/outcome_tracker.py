@@ -32,6 +32,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Callable
 
+from .storage import SNAPSHOT_GRACE_FACTOR
+
 if TYPE_CHECKING:
     from .market_context import MarketContext
     from .storage import Storage
@@ -250,8 +252,14 @@ class OutcomeTracker:
         age = now - signal_ts
         kwargs = {}
         for has_key, set_key, window in SNAPSHOT_WINDOWS:
-            # Заполняем поле только если: окно прошло И поле ещё не заполнено.
-            if age >= window and not c[has_key]:
+            # Окно прошло, поле ещё пустое — и снимок ЕЩЁ ИМЕЕТ СМЫСЛ.
+            #
+            # Верхняя граница важнее, чем кажется. Без неё строка, до которой
+            # очередь дошла через сутки, получала в price_1h цену суточной
+            # давности: поле называется "через час", а числом является совсем
+            # другим, и молча портит любой замер дрейфа. Честный пропуск
+            # лучше тихой подмены.
+            if not c[has_key] and window <= age <= window * SNAPSHOT_GRACE_FACTOR:
                 kwargs[set_key] = True
 
         target.update_snapshots(
