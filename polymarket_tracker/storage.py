@@ -184,6 +184,11 @@ class WalletStats:
 # Сколько строк удаляем за одну транзакцию при чистке истории.
 # Одним запросом 5.9 млн строк не проходят: журнал вырастает до гигабайтов,
 # и прерванная работа откатывается целиком.
+# Кеш страниц SQLite, МБ. Держать его надо согласованно с размером пачки
+# коммитов: за COMMIT_INTERVAL секунд набирается столько изменённых страниц,
+# сколько должно поместиться сюда целиком.
+CACHE_MB = 128
+
 PRUNE_CHUNK = 50_000
 
 COMMIT_EVERY = 500
@@ -237,10 +242,12 @@ class Storage:
         db_path: str,
         commit_every: int = COMMIT_EVERY,
         commit_interval: float = COMMIT_INTERVAL_SEC,
+        cache_mb: int = CACHE_MB,
     ):
         self.db_path = db_path
         self._commit_every = commit_every
         self._commit_interval = commit_interval
+        self._cache_mb = max(1, int(cache_mb))
         self._lock = threading.RLock()
         self._connection: Optional[sqlite3.Connection] = None
         self._pending = 0
@@ -301,6 +308,20 @@ class Storage:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA busy_timeout=30000")
+        # Кеш страниц. Нужен НЕ для чтения — чтения и так быстрые, их держит
+        # файловый кеш системы, — а из-за длинной транзакции.
+        #
+        # За 10 секунд накапливается около 2 МБ изменённых страниц: вставка
+        # в trades, обновление кошелька и два индекса, все с произвольным
+        # доступом. Ровно столько же составляет кеш SQLite по умолчанию,
+        # поэтому он переполняется и сбрасывает страницы на диск посреди
+        # транзакции — а при коммите те же страницы пишутся снова.
+        #
+        # Замерено на живом трекере: с пачкой 500/10с и кешем по умолчанию
+        # запись выросла с 1 ГБ/ч до 6 ГБ/ч. Размер пачки и размер кеша
+        # нужно менять вместе — по отдельности ни один замер этого не
+        # показывает: при коротких транзакциях кеш не влияет вовсе.
+        conn.execute(f"PRAGMA cache_size=-{self._cache_mb * 1024}")
         return conn
 
     @contextmanager
