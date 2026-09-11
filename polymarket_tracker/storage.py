@@ -181,6 +181,11 @@ class WalletStats:
 # Это безопасно по устройству — чекпоинт лежит в той же транзакции, что и
 # сами сделки, поэтому назад откатываются оба сразу, и догрузка после
 # перезапуска просто перечитает этот кусок из Data API.
+# Сколько строк удаляем за одну транзакцию при чистке истории.
+# Одним запросом 5.9 млн строк не проходят: журнал вырастает до гигабайтов,
+# и прерванная работа откатывается целиком.
+PRUNE_CHUNK = 50_000
+
 COMMIT_EVERY = 500
 COMMIT_INTERVAL_SEC = 10.0
 
@@ -1024,9 +1029,13 @@ class Storage:
             return c.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
 
     def prune_old_trades(
-        self, older_than_days: int = 7, now: Optional[int] = None
+        self,
+        older_than_days: int = 7,
+        now: Optional[int] = None,
+        chunk: int = PRUNE_CHUNK,
+        progress=None,
     ) -> int:
-        """Удалить строки trades старше older_than_days дней.
+        """Удалить строки trades старше older_than_days дней — порциями.
 
         Таблица trades нужна только для cluster-детекции и подсчёта свежих
         кошельков на токене — оба смотрят максимум на последний час
@@ -1034,17 +1043,43 @@ class Storage:
 
           * агрегаты в wallets (trade_count, first_seen_ts, total_volume_usdc)
             хранятся отдельно и НЕ пересчитываются из trades;
-          * signals / signal_outcomes таблицу trades не читают.
+          * signals / signal_outcomes таблицу trades не читают;
+          * признак "пробуждения" берёт историю кошелька из API, а эту
+            таблицу использует лишь как запасной путь.
 
-        VACUUM здесь НЕ вызывается — место на диске вернёт отдельный vacuum()
-        (его нельзя запускать внутри транзакции). Возвращает число удалённых
-        строк.
+        Почему порциями
+        ---------------
+        Одним запросом это не проходит. На живой базе под удаление попали
+        5.9 млн строк: журнал WAL распух до 3.5 ГБ, работа не уложилась в
+        отведённое время и откатилась целиком — то есть впустую.
+
+        Порции по PRUNE_CHUNK строк фиксируются по отдельности: журнал
+        остаётся небольшим, а прерванная уборка сохраняет уже сделанное и
+        в следующий раз продолжится с того же места.
+
+        VACUUM здесь НЕ вызывается — место на диске вернёт отдельный
+        vacuum() (его нельзя запускать внутри транзакции). Возвращает число
+        удалённых строк.
         """
         now = now if now is not None else int(time.time())
         cutoff = now - older_than_days * 86400
-        with self._conn() as c:
-            cur = c.execute("DELETE FROM trades WHERE ts < ?", (cutoff,))
-            return cur.rowcount or 0
+        deleted = 0
+        while True:
+            with self._conn() as c:
+                cur = c.execute(
+                    "DELETE FROM trades WHERE rowid IN ("
+                    "  SELECT rowid FROM trades WHERE ts < ? LIMIT ?)",
+                    (cutoff, chunk),
+                )
+                n = cur.rowcount or 0
+            # Каждая порция ложится на диск сразу. Без этого смысл дробления
+            # теряется: отложенный коммит собрал бы всё в одну пачку.
+            self.flush()
+            deleted += n
+            if progress is not None:
+                progress(deleted)
+            if n < chunk:
+                return deleted
 
     def vacuum(self) -> None:
         """Дефрагментировать БД и вернуть свободные страницы ОС.

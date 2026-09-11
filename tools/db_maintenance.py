@@ -195,12 +195,19 @@ def cmd_prune(db_path: Path, days: int, assume_yes: bool) -> int:
         return 1
 
     # prune_old_trades / vacuum живут в storage.py — импортируем пакет.
+    #
+    # Корень проекта добавляем в путь явно. При запуске "python
+    # tools/db_maintenance.py" интерпретатор кладёт в sys.path папку
+    # СКРИПТА, то есть tools/, а не текущий каталог, — и совет "запускай
+    # из корня" не помогал: импорт падал именно из корня.
+    root = str(Path(__file__).resolve().parent.parent)
+    if root not in sys.path:
+        sys.path.insert(0, root)
     try:
         from polymarket_tracker.storage import Storage
     except ImportError as e:
         print(f"✘ Не смог импортировать polymarket_tracker.storage: {e}")
-        print("  Запускай скрипт из КОРНЯ проекта (где лежит папка "
-              "polymarket_tracker/).")
+        print(f"  Ожидал найти пакет в {root}")
         return 1
 
     size_before = db_path.stat().st_size
@@ -224,7 +231,16 @@ def cmd_prune(db_path: Path, days: int, assume_yes: bool) -> int:
             return 0
 
     try:
-        deleted = storage.prune_old_trades(older_than_days=days)
+        last = [0]
+
+        def show(done: int) -> None:
+            # Печатаем не каждую порцию, а раз в полмиллиона строк: иначе
+            # вывод сам становится помехой.
+            if done - last[0] >= 500_000:
+                last[0] = done
+                print(f"    удалено {done:,}…", flush=True)
+
+        deleted = storage.prune_old_trades(older_than_days=days, progress=show)
     except sqlite3.OperationalError as e:
         print(f"✘ Не смог удалить строки ({e}). Похоже, трекер запущен.")
         return 1
