@@ -192,7 +192,8 @@ class PolymarketTracker:
 
         chase_task = (
             asyncio.create_task(
-                ChaseConfirmer(self.storage, self.notifier, self.config).run()
+                ChaseConfirmer(self.storage, self.notifier, self.config,
+                               market_ctx=self.market_ctx).run()
             )
             if self.config.chase_enabled else None
         )

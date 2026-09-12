@@ -109,3 +109,22 @@ def make_wallet(is_new: bool = True, trade_count: int = 3) -> WalletAssessment:
         total_volume_usdc=1000.0,
         reason="новый" if is_new else "обычный",
     )
+
+@pytest.fixture(autouse=True)
+def _no_network_nickname(monkeypatch):
+    """Ник трейдера тянется из Data API — в тестах это запрещено.
+
+    Заглушка автоматическая: иначе каждый новый тест на формат сообщения
+    молча уходил бы в сеть, ждал таймаута и проходил "успешно". Именно так
+    прогон и замедлился, когда карточку трейдера добавили в погоню.
+    """
+    async def fake(maker: str) -> str:
+        return ""
+
+    for module in ("trader_card", "confirmation", "fast_lane"):
+        try:
+            mod = __import__(f"polymarket_tracker.{module}", fromlist=["x"])
+        except ImportError:
+            continue
+        if hasattr(mod, "fetch_nickname"):
+            monkeypatch.setattr(mod, "fetch_nickname", fake)

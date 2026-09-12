@@ -38,10 +38,13 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import time
 from collections import deque
 from typing import Optional
+
+from .trader_card import fetch_nickname, market_of, outcome_line, trader_lines
 
 log = logging.getLogger(__name__)
 
@@ -207,6 +210,10 @@ class ChaseConfirmer:
         """Записать подтверждение и отправить сообщение."""
         self.stats["confirmed"] += 1
         price = float(row["price"])
+        size = float(row["usdc_amount"] or 0)
+        maker = row["maker"]
+        slug = row["market_slug"] or ""
+
         reason = (
             f"Рынок пошёл следом: за {self.config.chase_window_minutes:.0f} мин "
             f"${money:,.0f} зашло по средней {vwap:.3f} против его {price:.3f} "
@@ -215,10 +222,10 @@ class ChaseConfirmer:
         signal_id = self.storage.save_signal(
             ts=row["ts"],
             signal_type="chase",
-            maker=row["maker"],
+            maker=maker,
             token_id=row["token_id"],
             market_slug=row["market_slug"],
-            usdc_amount=float(row["usdc_amount"] or 0),
+            usdc_amount=size,
             price=price,
             reason=reason,
             tx_hash=row["tx_hash"],
@@ -226,20 +233,39 @@ class ChaseConfirmer:
         )
         self.storage.init_outcome_record(signal_id, int(time.time()))
 
+        # Рынок нужен ради исхода: без него сообщение говорит "рынок пошёл
+        # следом", но не говорит, на ЧТО поставлено.
+        market = await market_of(self.market_ctx, row["token_id"])
+        question = getattr(market, "question", "") if market else ""
+        event_slug = getattr(market, "event_slug", "") if market else ""
         url = (
-            f"https://polymarket.com/event/{row['market_slug']}"
-            if row["market_slug"] else "https://polymarket.com"
+            f"https://polymarket.com/event/{event_slug or slug}"
+            if (event_slug or slug) else "https://polymarket.com"
         )
-        text = (
-            f"🟢 <b>ПОГОНЯ · рынок пошёл следом</b>\n"
-            f"{row['market_slug'] or '?'}\n\n"
-            f"Он взял по <b>{price:.3f}</b> на ${float(row['usdc_amount'] or 0):,.0f}\n"
-            f"За {self.config.chase_window_minutes:.0f} мин следом зашло "
+
+        lines = ["🟢 <b>ПОГОНЯ · рынок пошёл следом</b>", ""]
+        if question:
+            lines.append(f"<b>Рынок:</b> {html.escape(question[:160])}")
+        elif slug:
+            lines.append(f"<b>Рынок:</b> {html.escape(slug)}")
+        outcome = outcome_line(market, price)
+        if outcome:
+            lines.append(outcome)
+        lines += [
+            f"<b>Он взял:</b> ${size:,.0f} по <b>{price:.3f}</b>",
+            "",
+            f"<b>Следом за {self.config.chase_window_minutes:.0f} мин:</b> "
             f"<b>${money:,.0f}</b> по средней <b>{vwap:.3f}</b> "
-            f"(<b>+{chase*100:.0f}%</b> к его цене)\n\n"
-            f"Вход сейчас — уже по новой цене, не по его. "
-            f"На выборке такие случаи давали перевес +35 пп.\n"
-            f'<a href="{url}">Открыть рынок</a>'
-        )
-        await self.notifier.send_html(text)
-        log.info("Подтверждение: %s +%.0f%% на $%.0f", row["market_slug"], chase * 100, money)
+            f"(<b>+{chase*100:.0f}%</b> к его цене)",
+            "",
+        ]
+        lines += trader_lines(self.storage, maker, await fetch_nickname(maker))
+        lines += [
+            "",
+            "<i>Вход сейчас — уже по новой цене, не по его. На выборке такие "
+            "случаи давали перевес +25 пп над безубытком.</i>",
+            "",
+            f'<a href="{url}">Открыть рынок</a>',
+        ]
+        await self.notifier.send_html(chr(10).join(lines))
+        log.info("Подтверждение: %s +%.0f%% на $%.0f", slug, chase * 100, money)
