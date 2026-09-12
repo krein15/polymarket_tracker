@@ -9,4 +9,9 @@ set "PYTHONIOENCODING=cp866:replace"
 REM Аргумент 1: не делать бэкап, если свежий моложе N часов (0 - делать всегда).
 set "MIN_AGE=%~1"
 if "%MIN_AGE%"=="" set "MIN_AGE=0"
-py -3 tools\db_maintenance.py backup --min-interval-hours %MIN_AGE%
+REM --light: копия без таблицы trades. Она занимает 95% объёма и при
+REM этом сырьё - её всё равно чистит ретеншн, а восстанавливать неоткуда
+REM и незачем. Ценное (сигналы, исходы, теневые сделки, кошельки) весит
+REM единицы мегабайт: замерено 4.4 ГБ -> 32 МБ.
+REM Полная копия, если понадобится: python tools\db_maintenance.py backup
+py -3 tools\db_maintenance.py backup --light --min-interval-hours %MIN_AGE%
