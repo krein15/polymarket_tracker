@@ -48,32 +48,23 @@
 from __future__ import annotations
 
 import argparse
-import collections
 import datetime
 import json
 import sys
 from pathlib import Path
-
-import requests
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from polymarket_tracker.forecaster import DEFAULT_EFFORT, forecast  # noqa: E402
+from polymarket_tracker.market_scanner import (  # noqa: E402
+    group_by_event,
+    pick_candidates,
+    yes_price,
+)
 
-GAMMA = "https://gamma-api.polymarket.com/markets"
 OUT_JSON = ROOT / "data" / "agent_coherence.json"
-
-# Ниже этой цены оценки модели бессмысленны — см. пояснение
-# в fetch_events.
-MIN_PRICE = 0.05
-
-# Сколько исходов брать от одного события. Без предела событие с
-# одиннадцатью кандидатами съедает половину бюджета прогона:
-# по факту рынок стоит ~$0.12 (токены плюс отдельная плата за
-# веб-поиск, которой в usage не видно).
-MAX_PER_EVENT = 5
 
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -89,64 +80,18 @@ def load_key() -> str:
     return ""
 
 
-def yes_price(market: dict):
-    try:
-        return float(json.loads(market.get("outcomePrices") or "[]")[0])
-    except (ValueError, TypeError, IndexError):
-        return None
-
-
-def event_slug(market: dict) -> str:
-    events = market.get("events") or []
-    if events and isinstance(events[0], dict):
-        return str(events[0].get("slug") or "")
-    return ""
-
-
 def fetch_events(top: int, wanted: str = "") -> list:
-    """События, у которых несколько взаимоисключающих рынков."""
-    markets = []
-    for page in range(3):
-        r = requests.get(GAMMA, params={
-            "closed": "false", "limit": "100", "offset": str(page * 100),
-            "order": "volume24hr", "ascending": "false", "include_tag": "true",
-        }, timeout=30)
-        if r.status_code != 200:
-            break
-        batch = r.json()
-        if not batch:
-            break
-        markets += batch
+    """События с несколькими взаимоисключающими исходами.
 
-    groups = collections.defaultdict(list)
-    for m in markets:
-        slug = event_slug(m)
-        if not slug:
-            continue
-        if json.loads(m.get("outcomes") or "[]") != ["Yes", "No"]:
-            continue
-        if yes_price(m) is None:
-            continue
-        if len(str(m.get("description") or "")) < 80:
-            continue
-        # Аутсайдеры дешевле MIN_PRICE выбрасываем. Обе модели загоняют их
-        # в свой пол: рынок 0.001 -> агент 0.01-0.02, то есть завышение в
-        # 10-20 раз. Любой "перевес", посчитанный на таком рынке, — артефакт
-        # того, что модель просто не умеет назвать число мельче сотой.
-        if (yes_price(m) or 0) < MIN_PRICE:
-            continue
-        groups[slug].append(m)
-
-    # Берём самые ликвидные исходы события: на них у модели есть шанс,
-    # и именно они определяют картину.
-    usable = {}
-    for k, v in groups.items():
-        if len(v) < 3:
-            continue
-        usable[k] = sorted(v, key=lambda m: -(yes_price(m) or 0))[:MAX_PER_EVENT]
+    Отбор общий с пилотом (market_scanner): свои правила здесь и были
+    причиной того, что прогон начался с биткойна — крипту отсеивал только
+    соседний файл.
+    """
+    candidates = pick_candidates(limit=10_000)
+    groups = group_by_event(candidates)
     if wanted:
-        return [(wanted, usable[wanted])] if wanted in usable else []
-    return sorted(usable.items(), key=lambda kv: -len(kv[1]))[:top]
+        return [(k, v) for k, v in groups if k == wanted]
+    return groups[:top]
 
 
 def main() -> int:

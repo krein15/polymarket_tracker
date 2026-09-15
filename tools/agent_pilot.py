@@ -26,14 +26,12 @@ import json
 import sys
 from pathlib import Path
 
-import requests
-
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from polymarket_tracker.forecaster import DEFAULT_EFFORT, forecast  # noqa: E402
-from polymarket_tracker.market_filter import is_ignored  # noqa: E402
+from polymarket_tracker.market_scanner import pick_candidates  # noqa: E402
 
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -41,21 +39,13 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-GAMMA = "https://gamma-api.polymarket.com/markets"
 OUT_JSON = ROOT / "data" / "agent_pilot.json"
 
-# Отбор. Ликвидность нужна, но крупные рынки не нужны: там нас уже
-# опередили. Крайние цены отбрасываем — на них нечего выигрывать, а
-# неблагоприятный отбор максимален.
-MIN_LIQUIDITY = 5_000
-MAX_LIQUIDITY = 400_000
-MIN_PRICE, MAX_PRICE = 0.10, 0.90
-MIN_DAYS, MAX_DAYS = 1, 21
-
-# Киберспорт внутри матча: замерено, что там перевес отрицательный даже у
-# самого трейдера. Агенту там тоже нечего делать — исход решается на
-# экране, а не в новостях.
-IGNORED = {"sports", "crypto"}
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 
 def load_key() -> str:
@@ -63,79 +53,6 @@ def load_key() -> str:
         if line.strip().startswith("ANTHROPIC_API_KEY="):
             return line.split("=", 1)[1].split("#")[0].strip()
     return ""
-
-
-def prices(market: dict):
-    try:
-        raw = json.loads(market.get("outcomePrices") or "[]")
-        return [float(x) for x in raw]
-    except (ValueError, TypeError):
-        return []
-
-
-def outcomes(market: dict):
-    try:
-        return json.loads(market.get("outcomes") or "[]")
-    except (ValueError, TypeError):
-        return []
-
-
-def pick_markets(limit: int) -> list:
-    """Кандидаты: ликвидные, закрываются скоро, цена не в крайностях."""
-    now = datetime.datetime.now(datetime.timezone.utc)
-    got = []
-    for page in range(4):
-        r = requests.get(GAMMA, params={
-            "closed": "false", "limit": "100", "offset": str(page * 100),
-            "order": "volume24hr", "ascending": "false",
-            # Без include_tag Gamma не возвращает теги ВООБЩЕ: поле приходит
-            # пустым, фильтру нечего проверять, и в пилот залетела крипта —
-            # ровно те рынки, где у агента заведомо нет шансов.
-            "include_tag": "true",
-        }, timeout=30)
-        if r.status_code != 200:
-            break
-        batch = r.json()
-        if not batch:
-            break
-        got += batch
-
-    out = []
-    for m in got:
-        if outcomes(m) != ["Yes", "No"]:
-            continue          # многоисходные рынки требуют другой вопрос
-        p = prices(m)
-        if len(p) != 2 or not (MIN_PRICE <= p[0] <= MAX_PRICE):
-            continue
-        liq = float(m.get("liquidity") or 0)
-        if not (MIN_LIQUIDITY <= liq <= MAX_LIQUIDITY):
-            continue
-        end = m.get("endDate")
-        if not end:
-            continue
-        try:
-            days = (datetime.datetime.fromisoformat(
-                end.replace("Z", "+00:00")) - now).days
-        except ValueError:
-            continue
-        if not (MIN_DAYS <= days <= MAX_DAYS):
-            continue
-        # Тот же чёрный список, что у остальных сигналов.
-        tags = {str(t.get("slug") if isinstance(t, dict) else t)
-                for t in (m.get("tags") or [])}
-        if not tags:
-            continue      # без тегов не отличить крипту от политики — пропускаем
-        fake = type("M", (), {"category": "", "tags": tags})()
-        if is_ignored(fake, set(), IGNORED):
-            continue
-        if len(str(m.get("description") or "")) < 80:
-            continue          # без правил расчёта оценивать нечего
-        m["_days"] = days
-        m["_price_yes"] = p[0]
-        out.append(m)
-        if len(out) >= limit:
-            break
-    return out
 
 
 def main() -> int:
@@ -154,7 +71,7 @@ def main() -> int:
     import anthropic
     client = anthropic.Anthropic(api_key=key, timeout=300.0)
 
-    markets = pick_markets(args.markets)
+    markets = pick_candidates(args.markets)
     if not markets:
         print("Подходящих рынков не нашлось — ослабь фильтры в начале файла.")
         return 1
