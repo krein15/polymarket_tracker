@@ -69,6 +69,12 @@ OUT_JSON = ROOT / "data" / "agent_coherence.json"
 # в fetch_events.
 MIN_PRICE = 0.05
 
+# Сколько исходов брать от одного события. Без предела событие с
+# одиннадцатью кандидатами съедает половину бюджета прогона:
+# по факту рынок стоит ~$0.12 (токены плюс отдельная плата за
+# веб-поиск, которой в usage не видно).
+MAX_PER_EVENT = 5
+
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(errors="replace")
@@ -131,7 +137,13 @@ def fetch_events(top: int, wanted: str = "") -> list:
             continue
         groups[slug].append(m)
 
-    usable = {k: v for k, v in groups.items() if len(v) >= 3}
+    # Берём самые ликвидные исходы события: на них у модели есть шанс,
+    # и именно они определяют картину.
+    usable = {}
+    for k, v in groups.items():
+        if len(v) < 3:
+            continue
+        usable[k] = sorted(v, key=lambda m: -(yes_price(m) or 0))[:MAX_PER_EVENT]
     if wanted:
         return [(wanted, usable[wanted])] if wanted in usable else []
     return sorted(usable.items(), key=lambda kv: -len(kv[1]))[:top]

@@ -68,6 +68,10 @@ WEB_SEARCH_TOOL = {
 # поиска в самом результате (см. Forecast.web_searches).
 DEFAULT_EFFORT = "high"
 
+# Цена одного веб-поиска. Выведена сверкой: 39 вызовов с ~105
+# поисками дали по счёту $5.14 при $2.5 по токенам.
+WEB_SEARCH_USD = 0.025
+
 SYSTEM_PROMPT = """Ты оцениваешь вероятность исходов для вопросов с рынка предсказаний.
 
 Порядок работы:
@@ -146,14 +150,24 @@ class Forecast:
 
 
 def estimate_cost(model: str, input_tokens: int, output_tokens: int,
-                  cache_read_tokens: int = 0) -> float:
-    """Примерная стоимость запроса. Чтение из кеша считаем по десятой доле
-    входной цены — порядок верный, точная ставка зависит от модели."""
+                  cache_read_tokens: int = 0, web_searches: int = 0) -> float:
+    """Примерная стоимость запроса.
+
+    Важно: САМ ВЕБ-ПОИСК ОПЛАЧИВАЕТСЯ ОТДЕЛЬНО и в usage не виден. Первый
+    прогон это и показал: по токенам выходило $2.5, по счёту в консоли —
+    $5.14. Сверка 39 вызовов и ~105 поисков дала около $0.025 за поиск,
+    то есть при трёх поисках это +$0.075 к каждому рынку — больше, чем
+    сами токены у Sonnet.
+
+    Без этого слагаемого оценка занижена вдвое, и планирование бюджета
+    по ней уводит в минус.
+    """
     price_in, price_out = PRICES_USD_PER_MTOK.get(model, (5.0, 25.0))
     return (
         input_tokens * price_in / 1_000_000
         + cache_read_tokens * price_in * 0.1 / 1_000_000
         + output_tokens * price_out / 1_000_000
+        + web_searches * WEB_SEARCH_USD
     )
 
 
@@ -258,7 +272,8 @@ def forecast(client, market: dict, today: str, model: str,
                        if stop == "max_tokens" else "не удалось разобрать ответ")
         empty.stop_reason = stop
         empty.input_tokens, empty.output_tokens = inp, out
-        empty.cost_usd = estimate_cost(model, inp, out, cached)
+        empty.cost_usd = estimate_cost(
+            model, inp, out, cached, _count_searches(response.content))
         return empty
 
     try:
@@ -287,6 +302,7 @@ def forecast(client, market: dict, today: str, model: str,
         cache_read_tokens=cached,
         web_searches=_count_searches(response.content),
         stop_reason=stop,
-        cost_usd=estimate_cost(model, inp, out, cached),
+        cost_usd=estimate_cost(model, inp, out, cached,
+                               _count_searches(response.content)),
         raw=data,
     )
