@@ -211,3 +211,62 @@ class TestTrackerPass:
         session = FakeSession(BOOK_PAYLOAD)
         self._run(storage, session, NOW)
         assert session.calls[0]["token_id"] == "tok-важный"
+
+
+class TestSendTimeNotTradeTime:
+    """Отсчёт идёт от отправки сообщения, а не от сделки трейдера.
+
+    У подтверждения по погоне в signals.ts лежит время СДЕЛКИ, которой к
+    моменту отправки уже 20-30 минут: окно наблюдения за последователями
+    длится 20 минут, и только потом уходит сообщение.
+
+    Пока отсчёт шёл по signals.ts, нижняя граница "не старше получаса"
+    выбрасывала погоню почти целиком: на живых данных замер цены входа
+    получили 73 сигнала из 221.
+    """
+
+    def _chase_signal(self, storage, trade_ts, sent_ts):
+        sid = storage.save_signal(
+            ts=trade_ts, signal_type="chase", maker="0x" + "a" * 40,
+            token_id="tok-1", market_slug="m", usdc_amount=5000.0, price=0.4,
+            reason="погоня", tx_hash=f"0x{trade_ts}", side="buy",
+        )
+        storage.init_outcome_record(sid, sent_ts)
+        return sid
+
+    def test_старая_сделка_но_свежая_отправка_замеряется(self, storage):
+        """Сделке 25 минут, сообщение ушло минуту назад — замерять надо."""
+        self._chase_signal(storage, trade_ts=NOW - 1500, sent_ts=NOW - 300)
+        rows = storage.signals_awaiting_entry(
+            ready_before=NOW - 120, oldest=NOW - 1800, limit=20)
+        assert len(rows) == 1
+        assert rows[0]["ts"] == NOW - 300, "взято время сделки вместо отправки"
+
+    def test_давняя_отправка_не_замеряется(self, storage):
+        """Сообщение ушло час назад — цена уже не та, что видел человек."""
+        self._chase_signal(storage, trade_ts=NOW - 5000, sent_ts=NOW - 3600)
+        assert storage.signals_awaiting_entry(
+            ready_before=NOW - 120, oldest=NOW - 1800, limit=20) == []
+
+    def test_свежая_отправка_ещё_не_созрела(self, storage):
+        """Отправлено 10 секунд назад — человек не успел бы нажать."""
+        self._chase_signal(storage, trade_ts=NOW - 1500, sent_ts=NOW - 10)
+        assert storage.signals_awaiting_entry(
+            ready_before=NOW - 120, oldest=NOW - 1800, limit=20) == []
+
+    def test_без_записи_исхода_берём_время_сигнала(self, storage):
+        """Запасной путь: если запись исхода не завелась, судим по signals.ts."""
+        signal(storage, NOW - 300)
+        rows = storage.signals_awaiting_entry(
+            ready_before=NOW - 120, oldest=NOW - 1800, limit=20)
+        assert len(rows) == 1
+        assert rows[0]["ts"] == NOW - 300
+
+    def test_очередь_по_времени_отправки(self, storage):
+        """Разбирать надо в порядке отправки: у свежих сигналов цена ещё
+        не ушла, и они важнее."""
+        self._chase_signal(storage, trade_ts=NOW - 3000, sent_ts=NOW - 200)
+        self._chase_signal(storage, trade_ts=NOW - 2000, sent_ts=NOW - 900)
+        rows = storage.signals_awaiting_entry(
+            ready_before=NOW - 120, oldest=NOW - 1800, limit=20)
+        assert [r["ts"] for r in rows] == [NOW - 900, NOW - 200]

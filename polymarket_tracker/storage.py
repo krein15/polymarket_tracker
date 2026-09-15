@@ -506,15 +506,26 @@ class Storage:
     ) -> list:
         """Сигналы, у которых пора снять цену входа, а замера ещё нет.
 
-        Нижняя граница по времени нужна после простоя: цену получасовой
-        давности снимать бессмысленно, а очередь иначе не рассасывается.
+        Отсчёт идёт от времени ОТПРАВКИ сообщения, а не от времени сделки.
+        Разница принципиальная: у подтверждения по погоне в signals.ts лежит
+        время сделки трейдера, которой к моменту отправки уже 20-30 минут.
+        Пока отсчёт шёл по нему, нижняя граница ("не старше получаса")
+        выбрасывала погоню почти целиком — замер получили 73 сигнала из 221.
+
+        Время отправки берём из signal_outcomes.created_ts: запись заводится
+        ровно в момент отправки. Если её почему-то нет, падаем на signals.ts.
         """
         with self._conn() as c:
             return c.execute(
-                "SELECT s.id, s.ts, s.token_id, s.price, s.signal_type "
-                "FROM signals s LEFT JOIN signal_entries e ON e.signal_id = s.id "
-                "WHERE e.signal_id IS NULL AND s.ts <= ? AND s.ts >= ? "
-                "ORDER BY s.ts LIMIT ?",
+                "SELECT s.id, COALESCE(o.created_ts, s.ts) AS ts, "
+                "       s.token_id, s.price, s.signal_type "
+                "FROM signals s "
+                "LEFT JOIN signal_entries e ON e.signal_id = s.id "
+                "LEFT JOIN signal_outcomes o ON o.signal_id = s.id "
+                "WHERE e.signal_id IS NULL "
+                "  AND COALESCE(o.created_ts, s.ts) <= ? "
+                "  AND COALESCE(o.created_ts, s.ts) >= ? "
+                "ORDER BY COALESCE(o.created_ts, s.ts) LIMIT ?",
                 (ready_before, oldest, limit),
             ).fetchall()
 
