@@ -96,7 +96,9 @@ def event_slug(market: dict) -> str:
     return ""
 
 
-def rejection_reason(market: dict, now: datetime.datetime) -> Optional[str]:
+def rejection_reason(market: dict, now: datetime.datetime,
+                     max_days: int = MAX_DAYS,
+                     max_liquidity: float = MAX_LIQUIDITY) -> Optional[str]:
     """Почему рынок не годится, или None если годится.
 
     Возвращаем причину, а не просто False: на отладке прогона важно видеть,
@@ -112,12 +114,12 @@ def rejection_reason(market: dict, now: datetime.datetime) -> Optional[str]:
     liq = float(market.get("liquidity") or 0)
     if liq < MIN_LIQUIDITY:
         return "мало ликвидности"
-    if liq > MAX_LIQUIDITY:
+    if liq > max_liquidity:
         return "слишком крупный рынок"
     days = days_left(market, now)
     if days is None:
         return "нет даты закрытия"
-    if not (MIN_DAYS <= days <= MAX_DAYS):
+    if not (MIN_DAYS <= days <= max_days):
         return f"закрытие через {days} дн."
     tags = tags_of(market)
     if not tags:
@@ -181,25 +183,53 @@ MAX_EXCLUSIVE_SUM = 1.15
 
 def group_by_event(markets: list, min_size: int = 3,
                    max_per_event: int = 5,
-                   exclusive_only: bool = True) -> list:
+                   exclusive_only: bool = True,
+                   now: Optional[datetime.datetime] = None,
+                   max_days: int = MAX_DAYS,
+                   max_liquidity: float = MAX_LIQUIDITY) -> list:
     """Сгруппировать по событию — для проверки связности.
+
+    На вход подаётся ПОЛНЫЙ список рынков, не отфильтрованный по цене.
+    Порядок здесь важен и однажды уже был нарушен: исключительность исходов
+    считается по ВСЕМУ набору события, а отбор по цене и ликвидности
+    применяется уже внутри.
+
+    Почему иначе не работает. У события "нефть достигнет 100/105/110/..."
+    шесть исходов с суммой 1.20 — вложенные пороги, для проверки связности
+    непригодны. Но после отсева дешёвых остаются четыре с суммой около
+    1.15, и порог перестаёт их ловить. Прогон снова уходил на нефть, пока
+    его не останавливали вручную.
 
     Внутри события берём самые дорогие исходы: на них у модели есть шанс,
     и именно они определяют картину.
+
+    max_days и max_liquidity здесь отдельные: для проверки КАЧЕСТВА модели
+    ни срок закрытия, ни размер рынка не важны — это не торговый отбор.
+    Под торговыми порогами таких событий не остаётся вовсе. Срок в 21 день
+    отсекает выборы (они закрываются через месяцы), а потолок ликвидности
+    в $400k — ключевые исходы: "Republicans Sweep" стоит $497k, "Единая
+    Россия" $409k. Без них набор перестаёт быть исчерпывающим, и проверять
+    становится нечего.
     """
+    now = now or datetime.datetime.now(datetime.timezone.utc)
     groups = collections.defaultdict(list)
     for m in markets:
+        if not is_binary(m) or yes_price(m) is None:
+            continue
         slug = event_slug(m)
         if slug:
             groups[slug].append(m)
+
     usable = []
     for slug, items in groups.items():
-        if len(items) < min_size:
-            continue
         if exclusive_only:
             total = sum(yes_price(x) or 0 for x in items)
             if total > MAX_EXCLUSIVE_SUM:
                 continue     # вложенные пороги, а не взаимоисключающие исходы
-        items = sorted(items, key=lambda x: -(yes_price(x) or 0))[:max_per_event]
-        usable.append((slug, items))
+        good = [m for m in items
+                if rejection_reason(m, now, max_days, max_liquidity) is None]
+        if len(good) < min_size:
+            continue
+        good = sorted(good, key=lambda x: -(yes_price(x) or 0))[:max_per_event]
+        usable.append((slug, good))
     return sorted(usable, key=lambda kv: -len(kv[1]))

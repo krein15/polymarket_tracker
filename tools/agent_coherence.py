@@ -59,8 +59,8 @@ if str(ROOT) not in sys.path:
 
 from polymarket_tracker.forecaster import DEFAULT_EFFORT, forecast  # noqa: E402
 from polymarket_tracker.market_scanner import (  # noqa: E402
+    fetch_markets,
     group_by_event,
-    pick_candidates,
     yes_price,
 )
 
@@ -80,15 +80,18 @@ def load_key() -> str:
     return ""
 
 
-def fetch_events(top: int, wanted: str = "") -> list:
+def fetch_events(top: int, wanted: str = "", max_days: int = 400) -> list:
     """События с несколькими взаимоисключающими исходами.
 
     Отбор общий с пилотом (market_scanner): свои правила здесь и были
     причиной того, что прогон начался с биткойна — крипту отсеивал только
     соседний файл.
     """
-    candidates = pick_candidates(limit=10_000)
-    groups = group_by_event(candidates)
+    # В группировку идёт ПОЛНЫЙ список: исключительность исходов считается
+    # по всему событию, иначе отсев дешёвых занижает сумму и вложенные
+    # пороги (нефть, биткойн) проскакивают.
+    groups = group_by_event(fetch_markets(3), max_days=max_days,
+                            max_liquidity=10_000_000)
     if wanted:
         return [(k, v) for k, v in groups if k == wanted]
     return groups[:top]
@@ -100,6 +103,9 @@ def main() -> int:
     p.add_argument("--top", type=int, default=1, help="сколько событий взять")
     p.add_argument("--models", default="claude-sonnet-5")
     p.add_argument("--effort", default=DEFAULT_EFFORT)
+    p.add_argument("--max-days", type=int, default=400,
+                   dest="max_days",
+                   help="срок закрытия; для проверки качества не важен")
     args = p.parse_args()
 
     key = load_key()
@@ -107,7 +113,7 @@ def main() -> int:
         print("[ОШИБКА] ANTHROPIC_API_KEY не найден в .env")
         return 1
 
-    events = fetch_events(args.top, args.event)
+    events = fetch_events(args.top, args.event, args.max_days)
     if not events:
         print("Событий с тремя и более взаимоисключающими рынками не нашлось.")
         return 1

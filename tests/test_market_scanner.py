@@ -187,5 +187,14 @@ class TestGroup:
                 for p in ("0.60", "0.45", "0.30")]
         assert len(group_by_event(pool, min_size=3, exclusive_only=False)) == 1
 
+    def test_исключительность_по_полному_набору(self):
+        """Порядок действий, который уже был нарушен: у нефти шесть исходов
+        с суммой 1.20, но после отсева дешёвых остаются четыре с суммой
+        около 1.15 — и порог перестаёт их ловить. Считать надо ДО отсева."""
+        pool = [market(events=[{"slug": "oil"}],
+                       outcomePrices=f'["{p}", "0.5"]')
+                for p in ("0.50", "0.35", "0.30", "0.05")]
+        assert group_by_event(pool, min_size=3, now=NOW) == []
+
     def test_событий_без_группы_нет(self):
         assert group_by_event([market(events=[])], min_size=3) == []
