@@ -135,6 +135,7 @@ class Forecast:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     web_searches: int = 0
+    stop_reason: str = ""
     cost_usd: float = 0.0
     error: str = ""
     raw: dict = field(default_factory=dict)
@@ -202,9 +203,16 @@ def _count_searches(content) -> int:
                if getattr(b, "type", None) == "web_search_tool_result")
 
 
+# Предел длины ответа. 8000 не хватало: мышление плюс разбор поисковой
+# выдачи съедают бюджет, и JSON обрывался на середине — два отказа из
+# одиннадцати у Opus. Ошибка выглядела как "не удалось разобрать ответ",
+# то есть указывала не туда.
+MAX_TOKENS = 16000
+
+
 def forecast(client, market: dict, today: str, model: str,
              effort: str = DEFAULT_EFFORT,
-             max_tokens: int = 8000) -> Forecast:
+             max_tokens: int = MAX_TOKENS) -> Forecast:
     """Оценить один рынок. Исключения не пробрасываем: в прогоне по
     десяткам рынков один отказ не должен ронять всю работу."""
     empty = Forecast(probability=0.0, confidence="", key_facts=[],
@@ -240,8 +248,15 @@ def forecast(client, market: dict, today: str, model: str,
     out = getattr(usage, "output_tokens", 0) or 0
     cached = getattr(usage, "cache_read_input_tokens", 0) or 0
 
+    stop = str(getattr(response, "stop_reason", "") or "")
     if not data or "probability" not in data:
-        empty.error = "не удалось разобрать ответ"
+        # Различать причины важно: обрыв по длине лечится увеличением
+        # max_tokens, а мусор в ответе — правкой промпта. На прогоне из
+        # 11 рынков Opus дал два таких отказа, и без этой строки они
+        # выглядели одинаково.
+        empty.error = ("ответ обрезан по пределу длины"
+                       if stop == "max_tokens" else "не удалось разобрать ответ")
+        empty.stop_reason = stop
         empty.input_tokens, empty.output_tokens = inp, out
         empty.cost_usd = estimate_cost(model, inp, out, cached)
         return empty
@@ -271,6 +286,7 @@ def forecast(client, market: dict, today: str, model: str,
         output_tokens=out,
         cache_read_tokens=cached,
         web_searches=_count_searches(response.content),
+        stop_reason=stop,
         cost_usd=estimate_cost(model, inp, out, cached),
         raw=data,
     )

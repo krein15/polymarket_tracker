@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from polymarket_tracker.forecaster import (
     DEFAULT_EFFORT,
+    MAX_TOKENS,
     OUTPUT_SCHEMA,
     SYSTEM_PROMPT,
     WEB_SEARCH_TOOL,
@@ -128,3 +129,16 @@ class TestCost:
 
     def test_незнакомая_модель_не_роняет(self):
         assert estimate_cost("claude-неизвестная", 1000, 100) > 0
+
+
+class TestLimits:
+    """Предел длины ответа.
+
+    На 8000 токенов у Opus два ответа из одиннадцати оборвались на середине
+    JSON: мышление плюс разбор поисковой выдачи съедают бюджет. Ошибка при
+    этом читалась как "не удалось разобрать ответ" и указывала не туда —
+    на промпт вместо предела.
+    """
+
+    def test_предел_с_запасом_на_мышление_и_поиск(self):
+        assert MAX_TOKENS >= 16000
