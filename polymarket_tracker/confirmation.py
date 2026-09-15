@@ -44,6 +44,7 @@ import time
 from collections import deque
 from typing import Optional
 
+from .market_filter import is_ignored_for
 from .trader_card import fetch_nickname, market_of, outcome_line, trader_lines
 
 log = logging.getLogger(__name__)
@@ -67,7 +68,8 @@ class ChaseConfirmer:
         self._recent_alerts: deque = deque()   # отметки времени отправок
         self._recent_retracts: deque = deque()
         self.stats = {"checked": 0, "confirmed": 0, "skipped_rate": 0,
-                      "backfilled": 0, "retracted": 0}
+                      "backfilled": 0, "retracted": 0,
+                      "ignored_category": 0}
 
     def _rate_ok(self, now: float, queue: Optional[deque] = None,
                  limit: Optional[int] = None) -> bool:
@@ -145,6 +147,13 @@ class ChaseConfirmer:
                 # Разобрали задним числом: в базу записали, но не шумим.
                 self.stats["backfilled"] += 1
                 continue
+            # Рынок запрашиваем ОДИН раз: он нужен и чёрному списку, и
+            # сообщению (ради исхода). До этой строки доходят единицы
+            # кандидатов из сотен, поэтому запрос здесь дёшев.
+            market = await market_of(self.market_ctx, row["token_id"])
+            if is_ignored_for(market, self.config):
+                self.stats["ignored_category"] += 1
+                continue
             now = time.time()
             if not self._rate_ok(now):
                 self.stats["skipped_rate"] += 1
@@ -152,7 +161,7 @@ class ChaseConfirmer:
                          cfg.chase_max_per_hour)
                 continue
             self._recent_alerts.append(now)
-            await self._emit(row, chase, money, vwap)
+            await self._emit(row, chase, money, vwap, market)
 
     async def _maybe_retract(self, row, chase: float, money: float,
                              vwap: float, fresh_after: int) -> None:
@@ -206,7 +215,8 @@ class ChaseConfirmer:
         await self.notifier.send_alert(text)
         log.info("Отбой: %s %.0f%% на $%.0f", slug, chase * 100, money)
 
-    async def _emit(self, row, chase: float, money: float, vwap: float) -> None:
+    async def _emit(self, row, chase: float, money: float, vwap: float,
+                    market=None) -> None:
         """Записать подтверждение и отправить сообщение."""
         self.stats["confirmed"] += 1
         price = float(row["price"])
@@ -233,9 +243,7 @@ class ChaseConfirmer:
         )
         self.storage.init_outcome_record(signal_id, int(time.time()))
 
-        # Рынок нужен ради исхода: без него сообщение говорит "рынок пошёл
-        # следом", но не говорит, на ЧТО поставлено.
-        market = await market_of(self.market_ctx, row["token_id"])
+        # Рынок уже получен в _pass — он нужен и чёрному списку, и исходу.
         question = getattr(market, "question", "") if market else ""
         event_slug = getattr(market, "event_slug", "") if market else ""
         url = (

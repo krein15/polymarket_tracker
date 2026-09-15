@@ -41,6 +41,7 @@ import aiohttp
 from collections import OrderedDict, deque
 from typing import Optional
 
+from .market_filter import is_ignored_for
 from .trader_card import fetch_nickname, trader_lines
 
 log = logging.getLogger(__name__)
@@ -70,7 +71,8 @@ class FastLane:
         self._seen: OrderedDict = OrderedDict()
         self._recent_alerts: deque = deque()
         self.stats = {"seen": 0, "checked": 0, "alerted": 0,
-                      "no_reference": 0, "near_resolved": 0, "skipped_rate": 0}
+                      "no_reference": 0, "near_resolved": 0, "skipped_rate": 0,
+                      "ignored_category": 0}
 
     def _rate_ok(self, now: float) -> bool:
         limit = self.config.onchain_max_per_hour
@@ -139,6 +141,11 @@ class FastLane:
         market = await self.market_ctx.get_by_token_id(trade.token_id)
         if market is not None and getattr(market, "closed", False):
             self.stats["near_resolved"] += 1
+            return
+        # Тот же чёрный список, что и у обычных сигналов. Раньше полоса его
+        # не спрашивала, и киберспорт шёл мимо фильтра.
+        if is_ignored_for(market, cfg):
+            self.stats["ignored_category"] += 1
             return
 
         if not self._rate_ok(time.time()):

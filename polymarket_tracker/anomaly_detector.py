@@ -32,6 +32,7 @@ from typing import Optional
 from .config import Config
 from .data_api_listener import Trade
 from .market_context import MarketInfo
+from .market_filter import is_ignored_for
 from .scoring import FeatureExtractor, Score, compute_score
 from .storage import Storage
 from .wallet_analyzer import WalletAssessment
@@ -193,13 +194,7 @@ class AnomalyDetector:
         {esports, league-of-legends, games, sports} — по одному лишь
         category="esports" фильтр "sports" его не поймает.
         """
-        cfg = self.config
-        market_tags = {market.category} | set(market.tags)
-        # ALLOWED_TAGS перевешивает: киберспорт помечен и как sports, вернуть
-        # его иначе нельзя, не открыв заодно весь обычный спорт.
-        if cfg.allowed_tags & market_tags:
-            return False
-        return bool(cfg.ignored_categories & market_tags)
+        return is_ignored_for(market, self.config)
 
     # ───────── Ветка A: прежняя логика, только для сравнения ─────────
 
