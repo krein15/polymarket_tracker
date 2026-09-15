@@ -2,6 +2,9 @@
 aiohttp>=3.9.0
 httpx>=0.27.0
 
+# Агент-оценщик (tools/agent_*.py, polymarket_tracker/forecaster.py)
+anthropic>=1.5.0
+
 # Конфиг
 python-dotenv>=1.0.0
 

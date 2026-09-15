@@ -46,6 +46,10 @@ Thumbs.db
 # ── Результат замера источников: выводится из БД, у каждого свой.
 data/funders.json
 
+# ── Прогоны агента-оценщика: результат замера, а не код.
+data/agent_pilot.json
+data/agent_coherence.json
+
 # ── Логи ──
 *.log
 logs/
