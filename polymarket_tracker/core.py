@@ -27,6 +27,7 @@ from .wallet_analyzer import WalletAnalyzer
 from .config import CTF_EXCHANGE_V2, NEG_RISK_CTF_EXCHANGE_V2
 from .confirmation import ChaseConfirmer
 from .entry_price import EntryPriceTracker
+from .retention import RetentionTask
 from .fast_lane import FastLane
 from .onchain_listener import OnchainListener
 from .heartbeat import Heartbeat, TrackerStats
@@ -197,6 +198,9 @@ class PolymarketTracker:
             )
             if self.config.chase_enabled else None
         )
+        # Чистка старых сделок. Раньше только ручная — и база за неделю
+        # выросла с 3.5 до 8.7 ГБ, а вместе с ней все индексы.
+        retention_task = asyncio.create_task(RetentionTask(self.storage).run())
         entry_task = (
             asyncio.create_task(
                 EntryPriceTracker(self.storage, self.config).run()
@@ -230,9 +234,10 @@ class PolymarketTracker:
                 fast_lane_task.cancel()
             if entry_task is not None:
                 entry_task.cancel()
+            retention_task.cancel()
             # Дать задачам корректно завершиться (подавляем CancelledError)
             for t in (stats_task, outcome_task, commands_task, heartbeat_task,
-                      chase_task, fast_lane_task, entry_task):
+                      chase_task, fast_lane_task, entry_task, retention_task):
                 if t is None:
                     continue
                 try:

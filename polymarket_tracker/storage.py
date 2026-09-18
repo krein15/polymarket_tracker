@@ -294,6 +294,19 @@ class Storage:
             # При этом лишний индекс стоил половины времени вставки:
             # 23.4 с против 11.6 с на 40 000 строк.
             c.execute("DROP INDEX IF EXISTS idx_trades_maker_cond")
+            # Индекс по времени сделки. Без него "какая последняя сделка"
+            # (MAX(ts)) и "с какого дня история" (MIN(ts)) читали индекс
+            # целиком: на базе в 8.7 ГБ — 28 и 22 секунды. MAX(ts) звали
+            # подтверждение погони и сторож простоя, каждые две минуты;
+            # MIN(ts) — скоринг прямо в цикле приёма сделок. Больше половины
+            # времени диск был занят этими сканами, а синхронный SQLite на
+            # это время останавливал весь трекер.
+            #
+            # На вставке индекс почти бесплатен — замерено: 2.0 с против
+            # 2.1 с на 60 000 строк. Время растёт монотонно, поэтому новая
+            # запись ложится в самый правый лист, а он всегда горячий. Этим он
+            # и отличается от удалённого maker_cond с произвольным доступом.
+            c.execute("CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts)")
         # Схема должна лечь на диск сразу, а не ждать пачку.
         self.flush()
 
@@ -1062,6 +1075,7 @@ class Storage:
         now: Optional[int] = None,
         chunk: int = PRUNE_CHUNK,
         progress=None,
+        max_rows: Optional[int] = None,
     ) -> int:
         """Удалить строки trades старше older_than_days дней — порциями.
 
@@ -1093,11 +1107,16 @@ class Storage:
         cutoff = now - older_than_days * 86400
         deleted = 0
         while True:
+            # Предел на вызов: фоновая чистка берёт понемногу, чтобы не
+            # останавливать приём сделок — SQLite синхронный.
+            take = chunk if max_rows is None else min(chunk, max_rows - deleted)
+            if take <= 0:
+                return deleted
             with self._conn() as c:
                 cur = c.execute(
                     "DELETE FROM trades WHERE rowid IN ("
                     "  SELECT rowid FROM trades WHERE ts < ? LIMIT ?)",
-                    (cutoff, chunk),
+                    (cutoff, take),
                 )
                 n = cur.rowcount or 0
             # Каждая порция ложится на диск сразу. Без этого смысл дробления
@@ -1106,7 +1125,7 @@ class Storage:
             deleted += n
             if progress is not None:
                 progress(deleted)
-            if n < chunk:
+            if n < take:
                 return deleted
 
     def vacuum(self) -> None:
