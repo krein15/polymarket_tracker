@@ -32,7 +32,7 @@ from typing import Optional
 from .config import Config
 from .data_api_listener import Trade
 from .market_context import MarketInfo
-from .market_filter import is_ignored_for
+from .market_filter import is_ignored_for_scoring
 from .scoring import FeatureExtractor, Score, compute_score
 from .storage import Storage
 from .wallet_analyzer import WalletAssessment
@@ -193,8 +193,12 @@ class AnomalyDetector:
         Сверяем и category, и теги: рынок LoL приходит с тегами
         {esports, league-of-legends, games, sports} — по одному лишь
         category="esports" фильтр "sports" его не поймает.
+
+        У ветки score свой, более широкий список: обычный спорт вернулся
+        21.09.2026 в те ветки, где он измерен, а здесь его балл никогда
+        не считался — см. is_ignored_for_scoring.
         """
-        return is_ignored_for(market, self.config)
+        return is_ignored_for_scoring(market, self.config)
 
     # ───────── Ветка A: прежняя логика, только для сравнения ─────────
 

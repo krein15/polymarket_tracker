@@ -80,7 +80,10 @@ class Config:
     cluster_window_seconds: int = 3600
 
     # Category filter
-    ignored_categories: Set[str] = field(default_factory=lambda: {"crypto", "sports"})
+    # 21.09.2026: было {"crypto", "sports"}. Тег sports стоит и на
+    # киберспорте, и на NFL, поэтому обычный спорт выключался заодно.
+    ignored_categories: Set[str] = field(
+        default_factory=lambda: {"crypto", "esports"})
     # Явное разрешение, перевешивает ignored_categories. Нужно, потому что
     # киберспортивные рынки Polymarket несут теги {esports, sports, ...}
     # одновременно: без исключения их режет фильтр "sports".
@@ -179,6 +182,13 @@ class Config:
     # 541 замер с исходом: вход ниже 0.50 — это четверть сделок и 84%
     # всего убытка, причём там в минусе и сам трейдер (перевес -36.8 пп
     # ниже 0.35, -19.3 пп на 0.35-0.50, и ровно 0 на 0.50-0.60).
+    # Добавка к чёрному списку только для ветки score. Спорт вернули в
+    # быструю полосу, белый список и погоню - там он измерен. В score его
+    # балл никогда не считался, и включать вслепую нельзя: сделок под
+    # порогом ликвидности 720 в сутки.
+    score_ignored_categories: Set[str] = field(
+        default_factory=lambda: {"sports"})
+
     entry_min_price: float = 0.50
     entry_verdict_enabled: bool = True
 
@@ -237,8 +247,11 @@ class Config:
                 return default
             return val.strip().lower() in ("1", "true", "yes", "on", "да")
 
-        ignored = _str("IGNORED_CATEGORIES", "crypto,sports").lower()
+        ignored = _str("IGNORED_CATEGORIES", "crypto,esports").lower()
         ignored_set = {c.strip() for c in ignored.split(",") if c.strip()}
+        score_extra = _str("SCORE_IGNORED_CATEGORIES", "sports").lower()
+        score_extra_set = {c.strip() for c in score_extra.split(",")
+                           if c.strip()}
         allowed = _str("ALLOWED_TAGS", "").lower()
         allowed_set = {c.strip() for c in allowed.split(",") if c.strip()}
 
@@ -258,6 +271,7 @@ class Config:
             cluster_min_participant_usdc=_float("CLUSTER_MIN_PARTICIPANT_USDC", 500.0),
             cluster_window_seconds=_int("CLUSTER_WINDOW_SECONDS", 3600),
             ignored_categories=ignored_set,
+            score_ignored_categories=score_extra_set,
             allowed_tags=allowed_set,
             scoring_enabled=_bool("SCORING_ENABLED", True),
             score_threshold=_float("SCORE_THRESHOLD", 50.0),

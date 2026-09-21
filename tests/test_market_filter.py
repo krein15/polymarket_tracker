@@ -18,7 +18,7 @@ score. Быстрая полоса и подтверждение по погон
 """
 from __future__ import annotations
 
-from polymarket_tracker.market_filter import is_ignored, is_ignored_for, market_tags
+from polymarket_tracker.market_filter import is_ignored, is_ignored_for, is_ignored_for_scoring, market_tags
 
 
 class Market:
@@ -134,3 +134,54 @@ class TestКиберспортОтдельноОтСпорта:
         старое = {"crypto", "sports"}
         assert is_ignored(Market("", self.КИБЕР["lol"]), set(), старое)
         assert is_ignored(Market("", self.ОБЫЧНЫЙ["nfl"]), set(), старое)
+
+
+class TestОтдельныйСписокДляСкоринга:
+    """У ветки score чёрный список шире общего.
+
+    Обычный спорт вернулся 21.09.2026 в те ветки, которые его и видели до
+    правки 15.09: ранние ончейн-сигналы, белый список, погоню. С порогом
+    входа 0.50 там n=131, ROI +3.5%, перевес трейдера +9.8 пп.
+
+    У score таких данных нет: фильтр он соблюдал всегда, и в теневой
+    выборке 33 237 спортивных сделок с ПУСТЫМ баллом. По киберспорту, где
+    балл считался, порог 40 проходит около трети — а спортивных сделок
+    под порогом ликвидности 720 в сутки. Включение вслепую дало бы
+    сотню-другую сигналов в день.
+    """
+
+    NFL = {"games", "nfl", "nfl-gameday", "sports"}
+    LOL = {"esports", "games", "league-of-legends", "sports"}
+
+    class Cfg:
+        allowed_tags = set()
+        ignored_categories = {"crypto", "esports"}
+        score_ignored_categories = {"sports"}
+
+    def test_спорт_проходит_в_обычные_ветки(self):
+        assert not is_ignored_for(Market("", self.NFL), self.Cfg())
+
+    def test_спорт_не_проходит_в_скоринг(self):
+        assert is_ignored_for_scoring(Market("", self.NFL), self.Cfg())
+
+    def test_киберспорт_не_проходит_никуда(self):
+        assert is_ignored_for(Market("", self.LOL), self.Cfg())
+        assert is_ignored_for_scoring(Market("", self.LOL), self.Cfg())
+
+    def test_политика_проходит_везде(self):
+        m = Market("politics", {"politics", "elections"})
+        assert not is_ignored_for(m, self.Cfg())
+        assert not is_ignored_for_scoring(m, self.Cfg())
+
+    def test_пустая_добавка_уравнивает_ветки(self):
+        class Same(TestОтдельныйСписокДляСкоринга.Cfg):
+            score_ignored_categories = set()
+
+        assert not is_ignored_for_scoring(Market("", self.NFL), Same())
+
+    def test_конфиг_без_добавки_не_роняет(self):
+        class Bare:
+            allowed_tags = set()
+            ignored_categories = {"crypto"}
+
+        assert not is_ignored_for_scoring(Market("", self.NFL), Bare())
