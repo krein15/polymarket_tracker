@@ -193,8 +193,10 @@ class EntryPriceTracker:
                       "blocked": 0}
 
     async def run(self) -> None:
-        log.info("Замер цены входа: снимок стакана через %d с после сигнала",
-                 self.delay)
+        log.info("Замер цены входа: снимок стакана через %d с после сигнала; "
+                 "вердикт %s, порог %.2f",
+                 self.delay, "включён" if self.verdict_on else "выключен",
+                 self.min_price)
         while True:
             try:
                 await asyncio.sleep(CHECK_INTERVAL_SEC)

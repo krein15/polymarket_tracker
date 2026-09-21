@@ -89,8 +89,10 @@ class ChaseConfirmer:
     async def run(self) -> None:
         cfg = self.config
         log.info(
-            "Подтверждение по погоне: окно %d мин, порог +%.0f%%, деньги от $%.0f",
-            cfg.chase_window_minutes, cfg.chase_min_ratio * 100, cfg.chase_min_money_usdc,
+            "Подтверждение по погоне: окно %d мин, сдвиг цены от +%.2f, "
+            "деньги от $%.0f (отбой при сдвиге %.2f)",
+            cfg.chase_window_minutes, cfg.chase_min_shift,
+            cfg.chase_min_money_usdc, cfg.chase_retract_shift,
         )
         while True:
             try:
@@ -136,10 +138,15 @@ class ChaseConfirmer:
 
             if chase is None:
                 continue
-            if chase <= cfg.chase_retract_ratio:
+            # Решаем по АБСОЛЮТНОМУ сдвигу цены, а не по проценту к его
+            # цене. Цены живут в (0,1]: относительный порог +25% при цене
+            # выше 0.80 требует VWAP больше единицы, и ветка не видела 30%
+            # рынков — ровно те, где цена не успевает от нас убежать.
+            shift = chase * price
+            if shift <= cfg.chase_retract_shift:
                 await self._maybe_retract(row, chase, money, vwap, fresh_after)
                 continue
-            if chase < cfg.chase_min_ratio:
+            if shift < cfg.chase_min_shift:
                 continue
             if money < cfg.chase_min_money_usdc:
                 continue
@@ -205,7 +212,7 @@ class ChaseConfirmer:
             f"на ${float(row['usdc_amount'] or 0):,.0f}",
             f"За {self.config.chase_window_minutes:.0f} мин следом зашло "
             f"<b>${money:,.0f}</b> по средней <b>{vwap:.3f}</b> "
-            f"(<b>{chase*100:.0f}%</b> к его цене)",
+            f"(<b>{vwap - price:+.3f}</b> к его цене, {chase*100:.0f}%)",
             "",
             "Рынок закладывает исход дешевле, чем он купил. На выборке такие "
             "сделки давали винрейт 21% при безубытке 53% и ROI -60%.",
@@ -264,14 +271,16 @@ class ChaseConfirmer:
             "",
             f"<b>Следом за {self.config.chase_window_minutes:.0f} мин:</b> "
             f"<b>${money:,.0f}</b> по средней <b>{vwap:.3f}</b> "
-            f"(<b>+{chase*100:.0f}%</b> к его цене)",
+            f"(<b>+{vwap - price:.3f}</b> к его цене, +{chase*100:.0f}%)",
             "",
         ]
         lines += trader_lines(self.storage, maker, await fetch_nickname(maker))
         lines += [
             "",
-            "<i>Вход сейчас — уже по новой цене, не по его. На выборке такие "
-            "случаи давали перевес +25 пп над безубытком.</i>",
+            "<i>Вход сейчас — уже по новой цене, не по его. На выборке "
+            "такие случаи давали перевес +24 пп над безубытком, но перевес "
+            "живёт в ЕГО цене: чем дешевле рынок, тем сильнее она от нас "
+            "убегает.</i>",
             "",
             f'<a href="{url}">Открыть рынок</a>',
         ]

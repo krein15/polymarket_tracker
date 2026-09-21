@@ -57,12 +57,15 @@ class FakeNotifier:
 
 class Cfg:
     chase_window_minutes = 20.0
-    chase_min_ratio = 0.15
+    # Порог в абсолютном сдвиге цены, а не в процентах к цене трейдера:
+    # цены живут в (0,1], и относительный порог физически недостижим на
+    # дорогих рынках (при цене 0.85 потолок сдвига всего +18%).
+    chase_min_shift = 0.05
     chase_min_money_usdc = 2000.0
     chase_max_age_minutes = 180.0
     chase_fresh_minutes = 180.0   # в тестах шумим по всей очереди
     chase_max_per_hour = 100
-    chase_retract_ratio = -0.15
+    chase_retract_shift = -0.05
     chase_retract_max_per_hour = 100
 
 
@@ -196,3 +199,72 @@ class TestVolumeGuards:
         asyncio.run(conf._pass())
         asyncio.run(conf._pass())
         assert conf.stats["checked"] == 3
+
+
+class TestАбсолютныйСдвигВместоПроцентов:
+    """Порог в процентах к цене трейдера слеп к дорогим рынкам.
+
+    Цены на Polymarket живут в (0,1]. Относительный порог +25% при его
+    цене 0.85 требовал бы VWAP 1.06 — такого не бывает, и ветка не видела
+    30% размеченных сделок. Замер на 29 980 сделках (деньги от $25k):
+
+        сейчас, chase >= +25%      n=591   ROI +84.2%   дороже 0.80:   0%
+        сдвиг цены >= +0.05       n=1479   ROI +48.1%   дороже 0.80:  10%
+        только дороже 0.80         n=155   ROI +13.2% [+9.4; +16.9],
+                                           винрейт 96% при безубытке 85%
+
+    ROI там ниже, но это ROI по ЕГО цене, а нам важна разница. Переплата
+    падает с ценой: медиана 9.0% ниже 0.35 и 1.2% выше 0.80. То есть
+    +13.2% в дорогом рынке достаются нам почти целиком, а +84.2% в
+    дешёвом — нет: погоня переплачивала там 50-60%.
+    """
+
+    def _run(self, storage, notifier):
+        conf = ChaseConfirmer(storage, notifier, Cfg())
+        asyncio.run(conf._pass())
+        return conf
+
+    def test_дорогой_рынок_теперь_виден(self, storage):
+        """0.85 -> 0.92: сдвиг +0.07, а в процентах всего +8%."""
+        candidate(storage, price=0.85)
+        buy(storage, "0x" + "2" * 40, 0.92, 6000.0, NOW + 300)
+        buy(storage, "0x" + "9" * 40, 0.85, 1.0, NOW + 3000)
+        n = FakeNotifier()
+        self._run(storage, n)
+        assert len(n.sent) == 1, "дорогой рынок снова не виден"
+
+    def test_копеечный_скачок_в_дешёвом_рынке_молчит(self, storage):
+        """0.10 -> 0.13: в процентах +30%, а по деньгам три копейки.
+
+        Старое правило такое подтверждало. Это те самые дешёвые входы,
+        которые дают 84% убытка при четверти сделок."""
+        candidate(storage, price=0.10)
+        buy(storage, "0x" + "2" * 40, 0.13, 6000.0, NOW + 300)
+        buy(storage, "0x" + "9" * 40, 0.10, 1.0, NOW + 3000)
+        n = FakeNotifier()
+        self._run(storage, n)
+        assert n.sent == [], "мелкий сдвиг в дешёвом рынке принят за погоню"
+
+    def test_крупный_сдвиг_в_дешёвом_рынке_по_прежнему_виден(self, storage):
+        """Отсекается мелочь, а не дешёвые рынки как класс."""
+        candidate(storage, price=0.10)
+        buy(storage, "0x" + "2" * 40, 0.25, 6000.0, NOW + 300)
+        buy(storage, "0x" + "9" * 40, 0.10, 1.0, NOW + 3000)
+        n = FakeNotifier()
+        self._run(storage, n)
+        assert len(n.sent) == 1
+
+    def test_отбой_тоже_по_сдвигу(self, storage):
+        """Зеркало: -0.05 ловит вдвое больше разворотов при том же
+        качестве (n=454 против 244, ROI -49.9% против -49.7%)."""
+        candidate(storage, price=0.85)
+        storage.save_signal(
+            ts=NOW, signal_type="score", maker=HERO, token_id=TOKEN,
+            market_slug="market-x", usdc_amount=5000.0, price=0.85,
+            reason="t", tx_hash=f"0x{HERO[-4:]}{NOW}5000", side="buy",
+        )
+        buy(storage, "0x" + "2" * 40, 0.78, 6000.0, NOW + 300)
+        buy(storage, "0x" + "9" * 40, 0.85, 1.0, NOW + 3000)
+        n = FakeNotifier()
+        self._run(storage, n)
+        assert len(n.sent) == 1 and "ОТБОЙ" in n.sent[0]

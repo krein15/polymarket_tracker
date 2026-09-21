@@ -136,7 +136,21 @@ class Config:
 
     chase_enabled: bool = True
     chase_window_minutes: float = 20.0
-    chase_min_ratio: float = 0.15
+    # Порог погони в АБСОЛЮТНОМ сдвиге цены, а не в процентах к цене
+    # трейдера. Цены живут в (0,1], поэтому относительный порог +25% при
+    # его цене выше 0.80 требует VWAP больше единицы — ветка физически не
+    # видела 30% рынков. Замер на 29 980 размеченных сделках, деньги
+    # последователей от $25k:
+    #
+    #     сейчас, chase >= +25%      n=591   ROI +84.2%   дороже 0.80:   0%
+    #     сдвиг цены >= +0.05       n=1479   ROI +48.1%   дороже 0.80:  10%
+    #     из них только дороже 0.80  n=155   ROI +13.2% [+9.4; +16.9]
+    #
+    # ROI ниже, но это ROI по ЕГО цене. В дорогих рынках цена не может
+    # убежать: переплата там 1.2% против 9-60% в дешёвых, то есть его
+    # +13.2% достаются нам почти целиком, а +84.2% — нет.
+    chase_min_shift: float = 0.05
+    chase_retract_shift: float = -0.05
     chase_min_money_usdc: float = 2000.0
     # Насколько глубоко в прошлое разбирать неотмеченных кандидатов после
     # простоя. Дальше смысла нет: рынок уже ушёл.
@@ -151,7 +165,6 @@ class Config:
     # и по силе — на 4985 сделках группа chase <= -15% даёт перевес -29.0 пп
     # и ROI -54%. Фильтра по деньгам здесь нет намеренно: он ослабляет
     # признак (-29.0 пп без фильтра против -13.5 пп при пороге $5000).
-    chase_retract_ratio: float = -0.15
     # Отдельный предел: отбоев около одного в сутки, и они не должны
     # вытесняться подтверждениями из общей квоты.
     chase_retract_max_per_hour: int = 3
@@ -267,12 +280,12 @@ class Config:
             onchain_max_per_hour=_int("ONCHAIN_MAX_PER_HOUR", 4),
             chase_enabled=_bool("CHASE_ENABLED", True),
             chase_window_minutes=_float("CHASE_WINDOW_MINUTES", 20.0),
-            chase_min_ratio=_float("CHASE_MIN_RATIO", 0.15),
+            chase_min_shift=_float("CHASE_MIN_SHIFT", 0.05),
+            chase_retract_shift=_float("CHASE_RETRACT_SHIFT", -0.05),
             chase_min_money_usdc=_float("CHASE_MIN_MONEY_USDC", 2000.0),
             chase_max_age_minutes=_float("CHASE_MAX_AGE_MINUTES", 180.0),
             chase_fresh_minutes=_float("CHASE_FRESH_MINUTES", 30.0),
             chase_max_per_hour=_int("CHASE_MAX_PER_HOUR", 3),
-            chase_retract_ratio=_float("CHASE_RETRACT_RATIO", -0.15),
             chase_retract_max_per_hour=_int("CHASE_RETRACT_MAX_PER_HOUR", 3),
             entry_price_enabled=_bool("ENTRY_PRICE_ENABLED", True),
             entry_delay_sec=_int("ENTRY_DELAY_SEC", 120),
