@@ -31,6 +31,7 @@ import argparse
 import math
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,8 +57,12 @@ def mean_ci(values: list) -> tuple:
     return mean, mean - 1.96 * se, mean + 1.96 * se
 
 
-def report(db: Path, size: int, signal_type: str) -> int:
+def report(db: Path, size: int, signal_type: str,
+           min_entry: float = 0.0, since: str = "") -> int:
     col = SIZE_COLUMNS[size]
+    since_ts = 0
+    if since:
+        since_ts = int(time.mktime(time.strptime(since, "%Y-%m-%d")))
     c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     c.row_factory = sqlite3.Row
     try:
@@ -69,8 +74,9 @@ def report(db: Path, size: int, signal_type: str) -> int:
             JOIN signal_entries e ON e.signal_id = s.id
             LEFT JOIN signal_outcomes o ON o.signal_id = s.id
             WHERE (? = 'all' OR s.signal_type = ?)
+              AND (? = 0 OR s.ts >= ?)
             """,
-            (signal_type, signal_type),
+            (signal_type, signal_type, since_ts, since_ts),
         ).fetchall()
     except sqlite3.OperationalError:
         print("Таблицы signal_entries ещё нет — трекер с этим замером не работал.")
@@ -86,11 +92,26 @@ def report(db: Path, size: int, signal_type: str) -> int:
     resolved = [r for r in rows
                 if r["market_resolved"] and r["settled_price"] is not None
                 and r["entry"] is not None]
+    # Порог цены входа. Это не фильтр отчёта, а то, что трекер реально
+    # блокирует вердиктом: вход ниже 0.50 — четверть сделок и 84% убытка,
+    # причём в минусе там сам трейдер.
+    cheap = [r for r in resolved if r["entry"] < min_entry]
+    if min_entry > 0:
+        resolved = [r for r in resolved if r["entry"] >= min_entry]
 
     print(f"Замеров цены входа: {measured}")
+    if since:
+        print(f"  считаем только сигналы с {since}")
     print(f"  стакан не тянул ${size}: {thin} "
           f"({thin / measured * 100:.0f}%) — такие сделки не открылись бы")
-    print(f"  дождались резолва: {len(resolved)}")
+    print(f"  дождались резолва: {len(resolved) + len(cheap)}")
+    if min_entry > 0:
+        share = len(cheap) / max(len(resolved) + len(cheap), 1) * 100
+        print(f"  отсечено порогом {min_entry:.2f}: {len(cheap)} "
+              f"({share:.0f}%) — вердикт по ним запрещает вход")
+        if cheap:
+            bad = [(r["settled_price"] - r["entry"]) / r["entry"] for r in cheap]
+            print(f"     их ROI, если бы вошли: {sum(bad) / len(bad) * 100:+.1f}%")
     if not resolved:
         print("\nПока нечего считать: ни один замеренный сигнал не закрылся.")
         return 0
@@ -135,8 +156,12 @@ def main() -> int:
     p.add_argument("--size", type=int, choices=sorted(SIZE_COLUMNS), default=2000)
     p.add_argument("--type", default="all",
                    help="score | chase | onchain_early | whitelist | all")
+    p.add_argument("--min-entry", type=float, default=0.0,
+                   help="не считать входы дешевле этой цены (боевой порог 0.50)")
+    p.add_argument("--since", default="",
+                   help="считать только сигналы с этой даты, ГГГГ-ММ-ДД")
     a = p.parse_args()
-    return report(Path(a.db), a.size, a.type)
+    return report(Path(a.db), a.size, a.type, a.min_entry, a.since)
 
 
 if __name__ == "__main__":
