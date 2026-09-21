@@ -52,6 +52,10 @@ BATCH_LIMIT = 30
 # чуть больший батч, чтобы очередь резолва не отставала.
 SHADOW_BATCH_LIMIT = 40
 
+# Снимки цены рынков: строк прибывает ~700 в сутки, и почти все ждут
+# резолва днями. Батч того же порядка, что у теневой выборки.
+PRICE_BATCH_LIMIT = 40
+
 # Пауза между HTTP-запросами внутри батча (сек).
 INTRA_BATCH_DELAY = 0.3
 
@@ -121,6 +125,16 @@ class OutcomeTracker:
             storage.finalize_shadow_outcome,
             SHADOW_BATCH_LIMIT,
         )
+        # Снимки цены рынков (price_sampler): та же форма кандидатов, тот
+        # же обработчик. "Трейдера" здесь нет — trader_was_right означает
+        # "исход сыграл", а price_at_signal это mid рынка.
+        self._price_target = _OutcomeTarget(
+            "price", "sample_id",
+            storage.get_price_samples_to_update,
+            storage.update_price_sample_snapshots,
+            storage.finalize_price_sample,
+            PRICE_BATCH_LIMIT,
+        )
 
     async def run(self) -> None:
         """Главный цикл. Работает до отмены извне (CancelledError)."""
@@ -142,7 +156,8 @@ class OutcomeTracker:
         while True:
             # Боевой и теневой проходы — независимо: падение одного не должно
             # мешать другому.
-            for pass_fn in (self._run_pass, self._run_shadow_pass):
+            for pass_fn in (self._run_pass, self._run_shadow_pass,
+                            self._run_price_pass):
                 try:
                     await pass_fn()
                 except asyncio.CancelledError:
@@ -163,6 +178,10 @@ class OutcomeTracker:
     async def _run_shadow_pass(self) -> None:
         """Проход по теневой выборке (shadow_trades, TODO 0.3)."""
         await self._run_target_pass(self._shadow_target)
+
+    async def _run_price_pass(self) -> None:
+        """Проход по снимкам цены рынков (price_samples)."""
+        await self._run_target_pass(self._price_target)
 
     async def _run_target_pass(self, target: _OutcomeTarget) -> None:
         """Один проход по одной таблице: запросить кандидатов, обновить каждого."""

@@ -149,6 +149,69 @@ CREATE INDEX IF NOT EXISTS idx_shadow_ts ON shadow_trades(ts);
 """
 
 
+# Снимки цены САМОГО РЫНКА, без привязки к чьим-либо сделкам.
+#
+# Зачем отдельная таблица. Всё, что мы мерили до сих пор, — это попытка
+# повторить за инсайдером, и выборка везде условна на том, что кто-то
+# совершил сделку. Но у предсказательных рынков есть давно известное
+# смещение: фавориты недооценены, аутсайдеры переоценены. На 38 669
+# теневых покупок оно видно:
+#
+#     цена 0.10-0.20   винрейт  8.4%   перевес -6.7 пп   ROI -44.4%
+#     цена 0.60-0.70   винрейт 68.3%   перевес +3.9 пп   ROI  +5.9%
+#
+# Возражение к этим числам одно и то же: это сделки людей, а не цены.
+# Информированные покупатели кучкуются там, где у них перевес, и часть
+# +5.9% может быть их правотой, а не ошибкой рынка. Здесь отбора нет
+# вообще: берём рынки из списка Gamma подряд и записываем цену, торговал
+# там кто-нибудь или нет.
+#
+# Оба исхода рынка пишутся отдельными строками. Иначе вышел бы перекос:
+# у вопросов "случится ли X?" сторона Yes почти всегда дешёвая, и
+# выборка только по Yes была бы выборкой аутсайдеров.
+SCHEMA_PRICE_SAMPLES = """
+CREATE TABLE IF NOT EXISTS price_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    token_id TEXT NOT NULL,
+    condition_id TEXT,
+    market_slug TEXT,
+    outcome TEXT,
+    -- mid — честная оценка "во что рынок оценивает исход";
+    -- best_ask и fill_2000 — то, что мы РЕАЛЬНО заплатили бы.
+    -- Разница между ними и есть ответ на вопрос "съест ли спред перевес".
+    mid REAL,
+    best_bid REAL,
+    best_ask REAL,
+    fill_2000 REAL,
+    depth_usdc REAL,
+    volume_24h REAL,
+    liquidity REAL,
+    end_date_ts INTEGER,
+    category TEXT,
+    -- поля резолва: та же форма, что у shadow_trades, ради общего
+    -- обработчика в outcome_tracker
+    price_1h REAL,
+    price_24h REAL,
+    price_7d REAL,
+    max_price_reached REAL,
+    min_price_reached REAL,
+    market_resolved INTEGER NOT NULL DEFAULT 0,
+    settled_price REAL,
+    won INTEGER,
+    roi_at_entry REAL,
+    hours_to_resolve REAL,
+    last_checked_ts INTEGER,
+    created_ts INTEGER NOT NULL,
+    UNIQUE (token_id, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_price_samples_queue
+    ON price_samples(market_resolved, last_checked_ts);
+CREATE INDEX IF NOT EXISTS idx_price_samples_token
+    ON price_samples(token_id, ts);
+"""
+
+
 @dataclass
 class WalletStats:
     address: str
@@ -216,6 +279,31 @@ _SHADOW_FIELDS = """
     (price_7d IS NOT NULL) AS has_price_7d
 """
 
+# Поля для общего обработчика исходов. Имена те же, что у теневой
+# выборки: outcome_tracker зовёт обе таблицы одним кодом.
+#
+# price_at_signal — середина, а если её нет, то аск. Односторонний
+# стакан у крайних рынков не редкость: на аутсайдера по 0.001 покупателей
+# нет вовсе, есть только продавцы. Середины там не существует, но купить
+# его можно — значит наблюдение есть, и терять его нельзя: это самый
+# хвост шкалы, ради которого замер и затевался.
+#
+# ROI по цене исполнения ($2000 с обходом стакана) считается в анализе из
+# fill_2000: смещение рынка и стоимость входа — два разных вопроса, и
+# смешивать их в одном числе нельзя.
+_PRICE_SAMPLE_FIELDS = """
+    id AS sample_id,
+    token_id,
+    'buy' AS side,
+    COALESCE(mid, best_ask) AS price_at_signal,
+    ts AS signal_ts,
+    last_checked_ts,
+    (price_1h IS NOT NULL) AS has_price_1h,
+    (price_24h IS NOT NULL) AS has_price_24h,
+    (price_7d IS NOT NULL) AS has_price_7d
+"""
+
+
 
 class Storage:
     """SQLite-хранилище: одно долгоживущее соединение, отложенный коммит.
@@ -257,6 +345,7 @@ class Storage:
             c.executescript(SCHEMA)
             c.executescript(SCHEMA_OUTCOMES)
             c.executescript(SCHEMA_SHADOW)
+            c.executescript(SCHEMA_PRICE_SAMPLES)
             # Идемпотентная миграция: добавить signals.side, если ещё нет.
             # Все старые сигналы — это buy (другая сторона ранее не реализовывалась).
             for ddl in (
@@ -878,6 +967,186 @@ class Storage:
                 "UPDATE signals SET telegram_msg_id = ? WHERE id = ?",
                 (msg_id, signal_id),
             )
+
+    # ───────── Снимки цены рынка (калибровка) ─────────
+
+    def save_price_sample(
+        self,
+        ts: int,
+        token_id: str,
+        condition_id: Optional[str],
+        market_slug: Optional[str],
+        outcome: Optional[str],
+        mid: Optional[float],
+        best_bid: Optional[float],
+        best_ask: Optional[float],
+        fill_2000: Optional[float],
+        depth_usdc: Optional[float],
+        volume_24h: Optional[float],
+        liquidity: Optional[float],
+        end_date_ts: Optional[int],
+        category: Optional[str],
+        now_ts: int,
+    ) -> Optional[int]:
+        """Записать снимок цены. None, если такой уже есть (тот же токен и ts)."""
+        with self._conn() as c:
+            cur = c.execute(
+                """
+                INSERT INTO price_samples (
+                    ts, token_id, condition_id, market_slug, outcome,
+                    mid, best_bid, best_ask, fill_2000, depth_usdc,
+                    volume_24h, liquidity, end_date_ts, category, created_ts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(token_id, ts) DO NOTHING
+                """,
+                (ts, token_id, condition_id, market_slug, outcome, mid,
+                 best_bid, best_ask, fill_2000, depth_usdc, volume_24h,
+                 liquidity, end_date_ts, category, now_ts),
+            )
+            return cur.lastrowid if cur.rowcount else None
+
+    def price_sampled_since(self, token_ids: list, since_ts: int) -> set:
+        """Какие из токенов уже снимались после since_ts.
+
+        Нужно, чтобы один и тот же рынок не попадал в выборку каждый час:
+        повторные снимки одного рынка — не независимые наблюдения, и
+        калибровку они перекосили бы в пользу долгоживущих рынков.
+        """
+        if not token_ids:
+            return set()
+        out = set()
+        with self._conn() as c:
+            for i in range(0, len(token_ids), 400):
+                chunk = list(token_ids[i:i + 400])
+                marks = ",".join("?" * len(chunk))
+                rows = c.execute(
+                    "SELECT DISTINCT token_id FROM price_samples "
+                    "WHERE ts >= ? AND token_id IN (" + marks + ")",
+                    [since_ts] + chunk,
+                ).fetchall()
+                out.update(r[0] for r in rows)
+        return out
+
+    def get_price_samples_to_update(
+        self, limit: int = 100, now_ts: Optional[int] = None
+    ) -> list:
+        """Незакрытые снимки для проверки резолва.
+
+        Форма та же, что у get_shadow_to_update: половина батча отдана
+        просроченным снимкам цены через час, половина — обычному LRU.
+        """
+        now_ts = int(time.time()) if now_ts is None else now_ts
+        half = max(1, limit // 2)
+        with self._conn() as c:
+            overdue = c.execute(
+                """
+                SELECT """ + _PRICE_SAMPLE_FIELDS + """
+                FROM price_samples
+                WHERE market_resolved = 0
+                  AND COALESCE(mid, best_ask) IS NOT NULL
+                  AND price_1h IS NULL
+                  AND ? - ts >= 3600
+                  AND ? - ts <= 3600 * ?
+                ORDER BY ts ASC
+                LIMIT ?
+                """,
+                (now_ts, now_ts, SNAPSHOT_GRACE_FACTOR, half),
+            ).fetchall()
+            seen = {r["sample_id"] for r in overdue}
+            rest = c.execute(
+                """
+                SELECT """ + _PRICE_SAMPLE_FIELDS + """
+                FROM price_samples
+                WHERE market_resolved = 0
+                  AND COALESCE(mid, best_ask) IS NOT NULL
+                ORDER BY
+                    CASE WHEN last_checked_ts IS NULL THEN 0 ELSE 1 END,
+                    last_checked_ts ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        out = [dict(r) for r in overdue]
+        for r in rest:
+            if len(out) >= limit:
+                break
+            if r["sample_id"] not in seen:
+                out.append(dict(r))
+        return out
+
+    def update_price_sample_snapshots(
+        self,
+        sample_id: int,
+        now_ts: int,
+        current_price: Optional[float],
+        set_price_1h: bool = False,
+        set_price_24h: bool = False,
+        set_price_7d: bool = False,
+    ) -> None:
+        """Мирроринг update_shadow_snapshots для price_samples."""
+        with self._conn() as c:
+            if current_price is None:
+                c.execute(
+                    "UPDATE price_samples SET last_checked_ts = ? WHERE id = ?",
+                    (now_ts, sample_id),
+                )
+                return
+            sets = ["last_checked_ts = ?",
+                    "max_price_reached = MAX(COALESCE(max_price_reached, ?), ?)",
+                    "min_price_reached = MIN(COALESCE(min_price_reached, ?), ?)"]
+            args = [now_ts, current_price, current_price,
+                    current_price, current_price]
+            for flag, col in ((set_price_1h, "price_1h"),
+                              (set_price_24h, "price_24h"),
+                              (set_price_7d, "price_7d")):
+                if flag:
+                    sets.append(col + " = ?")
+                    args.append(current_price)
+            args.append(sample_id)
+            c.execute(
+                "UPDATE price_samples SET " + ", ".join(sets) + " WHERE id = ?",
+                args,
+            )
+
+    def finalize_price_sample(
+        self,
+        sample_id: int,
+        settled_price: float,
+        trader_was_right: bool,
+        roi_if_followed: float,
+        hours_to_resolve: float,
+        now_ts: int,
+    ) -> None:
+        """Зафиксировать резолв снимка.
+
+        Имена аргументов — общие с другими таблицами, иначе обработчик
+        исходов не смог бы звать их одинаково. По смыслу здесь никакого
+        трейдера нет: trader_was_right — это "исход сыграл", а
+        roi_if_followed — доход при покупке по опорной цене (середина,
+        а у одностороннего стакана — аск).
+        """
+        with self._conn() as c:
+            c.execute(
+                """
+                UPDATE price_samples SET
+                    market_resolved = 1,
+                    settled_price = ?,
+                    won = ?,
+                    roi_at_entry = ?,
+                    hours_to_resolve = ?,
+                    last_checked_ts = ?
+                WHERE id = ?
+                """,
+                (settled_price, 1 if trader_was_right else 0,
+                 roi_if_followed, hours_to_resolve, now_ts, sample_id),
+            )
+
+    def count_price_samples(self, resolved_only: bool = False) -> int:
+        sql = "SELECT COUNT(*) FROM price_samples"
+        if resolved_only:
+            sql += " WHERE market_resolved = 1"
+        with self._conn() as c:
+            return c.execute(sql).fetchone()[0]
 
     # ───────── Checkpoint ─────────
 

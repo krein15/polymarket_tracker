@@ -162,14 +162,17 @@ def verdict(fill: Optional[float], his_price: Optional[float],
     return chr(10).join(lines)
 
 
-def parse_book(payload: dict) -> list:
-    """Аски из ответа /book как список (цена, размер).
+def parse_book(payload: dict, side: str = "asks") -> list:
+    """Одна сторона ответа /book как список (цена, размер).
 
     Отсутствующие или битые уровни пропускаем молча: один кривой уровень не
     повод потерять весь стакан.
+
+    Сторона — параметр, потому что замеру цены входа нужны аски, а снимку
+    рынка (price_sampler) — обе: без бида не посчитать середину.
     """
     out = []
-    for level in (payload or {}).get("asks") or []:
+    for level in (payload or {}).get(side) or []:
         try:
             out.append((float(level["price"]), float(level["size"])))
         except (KeyError, TypeError, ValueError):

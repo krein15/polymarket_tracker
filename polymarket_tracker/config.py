@@ -189,6 +189,13 @@ class Config:
     score_ignored_categories: Set[str] = field(
         default_factory=lambda: {"sports"})
 
+    # Снимки цены самих рынков (price_sampler). Отдельный замер, не
+    # связанный с сигналами: проверяем, ошибается ли рынок систематически,
+    # а не пытаемся ли мы успеть за инсайдером.
+    price_sample_enabled: bool = True
+    price_sample_batch: int = 30
+    price_sample_max_days: int = 30
+
     entry_min_price: float = 0.50
     entry_verdict_enabled: bool = True
 
@@ -303,6 +310,9 @@ class Config:
             chase_retract_max_per_hour=_int("CHASE_RETRACT_MAX_PER_HOUR", 3),
             entry_price_enabled=_bool("ENTRY_PRICE_ENABLED", True),
             entry_delay_sec=_int("ENTRY_DELAY_SEC", 120),
+            price_sample_enabled=_bool("PRICE_SAMPLE_ENABLED", True),
+            price_sample_batch=_int("PRICE_SAMPLE_BATCH", 30),
+            price_sample_max_days=_int("PRICE_SAMPLE_MAX_DAYS", 30),
             entry_min_price=_float("ENTRY_MIN_PRICE", 0.50),
             entry_verdict_enabled=_bool("ENTRY_VERDICT_ENABLED", True),
             heartbeat_enabled=_bool("HEARTBEAT_ENABLED", True),

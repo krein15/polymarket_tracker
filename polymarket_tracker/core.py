@@ -27,6 +27,7 @@ from .wallet_analyzer import WalletAnalyzer
 from .config import CTF_EXCHANGE_V2, NEG_RISK_CTF_EXCHANGE_V2
 from .confirmation import ChaseConfirmer
 from .entry_price import EntryPriceTracker
+from .price_sampler import PriceSampler
 from .retention import RetentionTask
 from .fast_lane import FastLane
 from .onchain_listener import OnchainListener
@@ -208,6 +209,14 @@ class PolymarketTracker:
             )
             if self.config.entry_price_enabled else None
         )
+        # Снимки цены рынков: единственный замер, не зависящий от того,
+        # торговал ли там кто-нибудь. Проверяет смещение самого рынка.
+        price_task = (
+            asyncio.create_task(
+                PriceSampler(self.storage, self.config).run()
+            )
+            if self.config.price_sample_enabled else None
+        )
         heartbeat_task = (
             asyncio.create_task(
                 Heartbeat(self.notifier, self._collect_stats, self.config).run()
@@ -235,10 +244,13 @@ class PolymarketTracker:
                 fast_lane_task.cancel()
             if entry_task is not None:
                 entry_task.cancel()
+            if price_task is not None:
+                price_task.cancel()
             retention_task.cancel()
             # Дать задачам корректно завершиться (подавляем CancelledError)
             for t in (stats_task, outcome_task, commands_task, heartbeat_task,
-                      chase_task, fast_lane_task, entry_task, retention_task):
+                      chase_task, fast_lane_task, entry_task, retention_task,
+                      price_task):
                 if t is None:
                     continue
                 try:
