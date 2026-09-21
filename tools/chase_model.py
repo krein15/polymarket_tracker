@@ -142,12 +142,15 @@ def money(rows):
 def show(label, rows):
     m, n, ci = money(rows)
     if m is None:
-        print("    {:<34}{:>6} закрылось {} — мало".format(label, len(rows), n))
+        print("    {:<30}{:>6} закрылось {} — мало".format(label, len(rows), n))
         return
-    share = sum(d["pos"] for d in rows) / len(rows) * 100
-    print("    {:<34}{:>6}  погонь {:>4.1f}%  ROI {:>+7.1f}% "
-          "[{:>+6.1f};{:>+6.1f}]  (закрылось {})"
-          .format(label, len(rows), share, m * 100,
+    pos = sum(d["pos"] for d in rows) / len(rows) * 100
+    neg = sum(d["neg"] for d in rows) / len(rows) * 100
+    # Доля разворотов печатается рядом не для красоты: признаки движения
+    # поднимают ОБЕ доли сразу, и по одной только погоне это незаметно.
+    print("    {:<30}{:>6}  погонь {:>4.1f}%  разворотов {:>4.1f}%  "
+          "ROI {:>+7.1f}% [{:>+6.1f};{:>+6.1f}]  (закрылось {})"
+          .format(label, len(rows), pos, neg, m * 100,
                   (m - ci) * 100, (m + ci) * 100, n))
 
 

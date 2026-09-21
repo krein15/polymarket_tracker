@@ -105,6 +105,9 @@ def features(conn, r) -> dict:
     flow = sum(x["usdc_amount"] for x in recent)
     d = {
         "id": r["id"], "ts": ts, "price": r["price"],
+        # Кошелёк нужен для признаков "про человека", а не про рынок:
+        # рыночные признаки предсказывают движение, но не направление.
+        "maker": maker, "token_id": token,
         "usdc": r["usdc_amount"], "slug": r["market_slug"],
         "category": r["category"], "volume_24h": r["volume_24h"],
         "score": r["score"], "chase": r["chase"],
