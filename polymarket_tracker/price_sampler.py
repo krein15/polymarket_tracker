@@ -48,6 +48,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -85,6 +86,11 @@ FILL_SIZE_USDC = 2000.0
 
 # Пауза между запросами стакана. Рынков за проход немного, спешить некуда.
 REQUEST_PAUSE_SEC = 0.15
+
+# Верхняя граница случайного смещения. Сколько рынков закрывается в
+# горизонте, заранее неизвестно, поэтому начинаем с оценки и учим по
+# ответам API.
+START_BOUND = 1000
 
 OFFSET_KEY = "price_sampler_offset"
 
@@ -238,12 +244,23 @@ class PriceSampler:
         return saved
 
     async def _fetch_page(self, session) -> Optional[list]:
-        """Следующая страница списка рынков. Смещение хранится в БД.
+        """Случайная страница списка рынков.
 
-        Дойдя до конца списка, начинаем сначала: рынки закрываются и
-        появляются, и второй круг соберёт уже другие.
+        Почему случайная, а не следующая по порядку. Первый живой проход
+        записал 53 строки — и все 53 по одной категории: список идёт
+        блоками, и подряд лежали 27 рынков одного события (кандидаты на
+        выборах в Бразилии). Последовательный обход означал бы, что
+        несколько часов подряд выборка состоит из одного события, а это
+        не независимые наблюдения: они делят и исход, и настроение рынка.
+
+        Верхнюю границу смещения не знаем заранее и учим по ответам:
+        пустая страница означает, что дальше ничего нет, полная — что
+        может быть ещё. Так граница сама подстраивается под то, сколько
+        рынков сейчас закрывается в горизонте.
         """
-        offset = int(self.storage.get_checkpoint(OFFSET_KEY) or 0)
+        bound = int(self.storage.get_checkpoint(OFFSET_KEY) or START_BOUND)
+        bound = max(PAGE_SIZE, bound)
+        offset = random.randrange(0, bound)
         now = datetime.now(timezone.utc)
         # Рамку задаёт сам Gamma, а не мы постфактум. Без этих двух
         # параметров список идёт в своём порядке, и первая же страница
@@ -267,10 +284,13 @@ class PriceSampler:
             return None
 
         if not data:
-            self.storage.set_checkpoint(OFFSET_KEY, "0")
-            log.info("Снимки цены: список рынков пройден, начинаем сначала")
+            # Дальше этого места рынков нет — сузить границу.
+            self.storage.set_checkpoint(
+                OFFSET_KEY, str(max(PAGE_SIZE, offset)))
             return None
-        self.storage.set_checkpoint(OFFSET_KEY, str(offset + PAGE_SIZE))
+        if len(data) >= PAGE_SIZE and offset + 2 * PAGE_SIZE > bound:
+            # Страница полная у самого края — возможно, есть ещё.
+            self.storage.set_checkpoint(OFFSET_KEY, str(offset + 2 * PAGE_SIZE))
         self.stats["pages"] += 1
         return data
 

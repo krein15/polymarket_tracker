@@ -286,3 +286,67 @@ class TestПроход:
         monkeypatch.setattr(s, "_fetch_page", fake_page)
         asyncio.run(s.run_once())
         assert st.checkpoints == {}    # страница не пришла — смещение не двигаем
+
+
+class TestСлучайноеСмещение:
+    """Страница берётся случайная, а не следующая по порядку.
+
+    Первый живой проход записал 53 строки — и все 53 по одной категории:
+    список Gamma идёт блоками, и подряд лежали 27 рынков одного события
+    (кандидаты на выборах в Бразилии). Последовательный обход означал бы,
+    что несколько часов подряд выборка состоит из одного события, а это
+    не независимые наблюдения: они делят и исход, и настроение рынка.
+    """
+
+    class Session:
+        def __init__(self, empty_from=None):
+            self.offsets = []
+            self.empty_from = empty_from
+
+        def get(self, url, params=None):
+            self.offsets.append(int(params["offset"]))
+            page = ([] if (self.empty_from is not None
+                           and params["offset"] >= self.empty_from)
+                    else [gamma_market(slug=f"m{params['offset']}")] * 100)
+            return _Resp(page)
+
+    def _fetch(self, storage, session):
+        s = PriceSampler(storage, Cfg())
+        return asyncio.run(s._fetch_page(session))
+
+    def test_смещения_разные(self):
+        st = FakeStorage()
+        ses = self.Session()
+        for _ in range(12):
+            self._fetch(st, ses)
+        assert len(set(ses.offsets)) > 1, "смещение не меняется"
+
+    def test_пустая_страница_сужает_границу(self):
+        """Иначе выборка вечно била бы в пустоту за краем списка."""
+        st = FakeStorage()
+        st.checkpoints["price_sampler_offset"] = "10000"
+        ses = self.Session(empty_from=0)
+        assert self._fetch(st, ses) is None
+        assert int(st.checkpoints["price_sampler_offset"]) < 10000
+
+    def test_граница_не_опускается_ниже_страницы(self):
+        """Иначе randrange(0, 0) уронил бы проход."""
+        st = FakeStorage()
+        st.checkpoints["price_sampler_offset"] = "0"
+        ses = self.Session()
+        assert self._fetch(st, ses) is not None
+
+
+class _Resp:
+    def __init__(self, payload):
+        self.status = 200
+        self._payload = payload
+
+    async def json(self):
+        return self._payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
