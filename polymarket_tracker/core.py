@@ -203,7 +203,8 @@ class PolymarketTracker:
         retention_task = asyncio.create_task(RetentionTask(self.storage).run())
         entry_task = (
             asyncio.create_task(
-                EntryPriceTracker(self.storage, self.config).run()
+                EntryPriceTracker(self.storage, self.config,
+                                  notifier=self.notifier).run()
             )
             if self.config.entry_price_enabled else None
         )

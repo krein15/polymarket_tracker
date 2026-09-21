@@ -31,6 +31,20 @@
 заниженную цену входа и завышенную прибыль — молча, без единого падения.
 Поэтому берём `/book` целиком и разбираем сами: заодно видно глубину.
 
+Красный вердикт (21.09.2026)
+---------------------------
+Замер перестал быть только наблюдением. На 541 сигнале с исходом убыток
+оказался сосредоточен в дешёвых входах:
+
+    наша цена     сделок   ROI у нас   ROI у трейдера   доля убытка
+    < 0.35            54      -83.5%          -87.5%           55%
+    0.35-0.50         81      -29.4%          -38.2%           29%
+    0.50-0.60         87       -3.6%           +0.7%            4%
+
+Четверть сделок даёт 84% убытка, и там в минусе сам трейдер — значит
+отсекается не наше опоздание, а его плохие сделки. Поэтому вход ниже
+ENTRY_MIN_PRICE помечается отдельным сообщением в ту же ветку.
+
 Почему обход стакана, а не верх книги
 -------------------------------------
 Верх книги — это цена первой сотни долларов. Сигнальные сделки — тысячи
@@ -41,6 +55,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import time
 from typing import Optional
@@ -61,6 +76,10 @@ ENTRY_DELAY_SEC = 120
 # само по себе результат: если $5000 стоят заметно дороже $500, значит
 # стратегия не масштабируется.
 FILL_SIZES_USDC = (500.0, 2000.0, 5000.0)
+
+# На какой размер считаем вердикт. Именно на нём мерились пороги:
+# все цифры про "84% убытка ниже 0.50" получены по fill_2000.
+VERDICT_SIZE_USDC = 2000.0
 
 # Как часто просыпаемся и сколько сигналов разбираем за проход.
 #
@@ -107,6 +126,42 @@ def fill_price(asks: list, usdc_amount: float) -> Optional[float]:
     return spent / shares
 
 
+def verdict(fill: Optional[float], his_price: Optional[float],
+            min_price: float, depth: Optional[float] = None,
+            slug: Optional[str] = None) -> Optional[str]:
+    """Сообщение "не входить", либо None, если вход проходит порог.
+
+    Молчим, когда всё в порядке: вердикт по каждому сигналу удвоил бы
+    поток сообщений и съел общий часовой лимит, а он один на все ветки —
+    вердикт вытеснял бы сами сигналы.
+
+    Важная оговорка: МОЛЧАНИЕ НЕ ЗНАЧИТ "можно". Замер мог не состояться
+    (рынок закрылся, сигнал пролежал дольше ENTRY_MAX_AGE_SEC), и тогда
+    вердикта не будет вовсе. Зелёного света этот механизм не даёт — он
+    только гасит красный.
+
+    Откуда порог: 541 замер с исходом. Ниже 0.50 — четверть сделок и 84%
+    всего убытка, и там в минусе сам трейдер (перевес -36.8 пп ниже 0.35,
+    -19.3 пп на 0.35-0.50). То есть мы отсекаем не своё опоздание, а его
+    плохие сделки.
+    """
+    name = html.escape(slug or "?")
+    if fill is None:
+        got = f"{depth:,.0f}".replace(",", " ") if depth else "0"
+        return (f"⚠️ <b>Стакан тоньше ${VERDICT_SIZE_USDC:.0f}</b>"
+                f" · {name}"
+                f"{chr(10)}Всего в асках ${got} — ордер целиком не нальётся")
+    if fill >= min_price:
+        return None
+    lines = [f"⛔ <b>Не входить</b> · {name}",
+             f"Вход ${VERDICT_SIZE_USDC:.0f} = <b>{fill:.2f}</b>"
+             f" при пороге {min_price:.2f}"]
+    if his_price and his_price > 0:
+        lines.append(f"Трейдер вошёл по {his_price:.2f} "
+                     f"({fill / his_price - 1:+.0%})")
+    return chr(10).join(lines)
+
+
 def parse_book(payload: dict) -> list:
     """Аски из ответа /book как список (цена, размер).
 
@@ -125,10 +180,17 @@ def parse_book(payload: dict) -> list:
 class EntryPriceTracker:
     """Фоновая задача: записать достижимую цену входа по свежим сигналам."""
 
-    def __init__(self, storage, config=None):
+    def __init__(self, storage, config=None, notifier=None):
         self.storage = storage
+        self.notifier = notifier
         self.delay = getattr(config, "entry_delay_sec", ENTRY_DELAY_SEC)
-        self.stats = {"checked": 0, "saved": 0, "no_book": 0, "too_thin": 0}
+        self.min_price = getattr(config, "entry_min_price", 0.0)
+        self.verdict_on = bool(
+            notifier is not None
+            and getattr(config, "entry_verdict_enabled", False)
+        )
+        self.stats = {"checked": 0, "saved": 0, "no_book": 0, "too_thin": 0,
+                      "blocked": 0}
 
     async def run(self) -> None:
         log.info("Замер цены входа: снимок стакана через %d с после сигнала",
@@ -180,6 +242,23 @@ class EntryPriceTracker:
             depth_usdc=depth,
         )
         self.stats["saved"] += 1
+        await self._verdict(row, fills.get(VERDICT_SIZE_USDC), depth)
+
+    async def _verdict(self, row, fill: Optional[float],
+                       depth: Optional[float]) -> None:
+        """Красный вердикт в ту же ветку сообщений, что и сигнал."""
+        if not self.verdict_on:
+            return
+        text = verdict(fill, row["price"], self.min_price, depth,
+                       row["market_slug"])
+        if text is None:
+            return
+        self.stats["blocked"] += 1
+        try:
+            await self.notifier.send_html(
+                text, reply_to=row["telegram_msg_id"])
+        except Exception as e:  # noqa: BLE001 — вердикт не роняет замер
+            log.warning("Вердикт по цене входа не отправлен: %s", e)
 
     async def _fetch_asks(self, session, token_id: str):
         try:

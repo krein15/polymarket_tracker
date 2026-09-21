@@ -22,6 +22,7 @@ from polymarket_tracker.entry_price import (
     EntryPriceTracker,
     fill_price,
     parse_book,
+    verdict,
 )
 
 # Стакан с живого рынка: 0.59 на $3634, дальше дороже.
@@ -270,3 +271,158 @@ class TestSendTimeNotTradeTime:
         rows = storage.signals_awaiting_entry(
             ready_before=NOW - 120, oldest=NOW - 1800, limit=20)
         assert [r["ts"] for r in rows] == [NOW - 900, NOW - 200]
+
+
+# ───────────────────────── Красный вердикт ─────────────────────────
+
+
+class FakeNotifier:
+    def __init__(self, fail=False):
+        self.sent = []
+        self.fail = fail
+
+    async def send_html(self, text, reply_to=None):
+        if self.fail:
+            raise RuntimeError("телеграм недоступен")
+        self.sent.append({"text": text, "reply_to": reply_to})
+        return 777
+
+
+class CfgVerdict:
+    entry_delay_sec = 120
+    entry_min_price = 0.50
+    entry_verdict_enabled = True
+
+
+class TestVerdict:
+    """Порог 0.50 взят не с потолка.
+
+    541 сигнал с замером и исходом:
+
+        наша цена    сделок   ROI у нас   ROI у трейдера   доля убытка
+        < 0.35           54      -83.5%          -87.5%           55%
+        0.35-0.50        81      -29.4%          -38.2%           29%
+        0.50-0.60        87       -3.6%           +0.7%            4%
+
+    Четверть сделок несёт 84% убытка, и там в минусе сам трейдер. Значит
+    отсекается не наше опоздание, а его плохие сделки.
+    """
+
+    def test_дешёвый_вход_запрещён(self):
+        text = verdict(0.43, 0.38, 0.50, 5000.0, "nfl-kc-buf")
+        assert text and "Не входить" in text
+        assert "0.43" in text and "0.50" in text
+
+    def test_цена_ровно_на_пороге_проходит(self):
+        """Граница включительно: 0.50-0.60 на данных уже нейтральна."""
+        assert verdict(0.50, 0.48, 0.50, 5000.0, "m") is None
+
+    def test_дорогой_вход_молчит(self):
+        assert verdict(0.72, 0.70, 0.50, 9000.0, "m") is None
+
+    def test_тонкий_стакан_предупреждает(self):
+        """Цены нет не потому, что дёшево, а потому, что не нальётся."""
+        text = verdict(None, 0.38, 0.50, 812.0, "m")
+        assert text and "тоньше" in text and "812" in text
+
+    def test_переплата_к_трейдеру_показана(self):
+        text = verdict(0.44, 0.40, 0.50, 5000.0, "m")
+        assert "0.40" in text and "+10%" in text
+
+    def test_без_цены_трейдера_строка_не_ломается(self):
+        text = verdict(0.44, None, 0.50, 5000.0, "m")
+        assert text and "Трейдер" not in text
+
+    def test_имя_рынка_экранируется(self):
+        """Слаг приходит из API и попадает в HTML-сообщение."""
+        text = verdict(0.44, 0.40, 0.50, 5000.0, "a<b>c")
+        assert "a&lt;b&gt;c" in text
+
+    def test_нулевой_порог_ничего_не_запрещает(self):
+        """Выключенный порог не должен молча блокировать дешёвые входы."""
+        assert verdict(0.05, 0.04, 0.0, 5000.0, "m") is None
+
+
+class TestVerdictSending:
+    def _run(self, storage, payload, notifier, cfg=CfgVerdict, now=NOW):
+        tracker = EntryPriceTracker(storage, cfg(), notifier=notifier)
+
+        async def go():
+            rows = storage.signals_awaiting_entry(
+                ready_before=now - cfg.entry_delay_sec, oldest=now - 1800,
+                limit=20)
+            for row in rows:
+                await tracker._one(FakeSession(payload), row, now)
+
+        asyncio.run(go())
+        return tracker
+
+    def test_дешёвый_вход_шлёт_вердикт(self, storage):
+        signal(storage, NOW - 300, price=0.40)
+        cheap = {"asks": [{"price": "0.42", "size": "20000"}]}
+        notifier = FakeNotifier()
+        tracker = self._run(storage, cheap, notifier)
+        assert len(notifier.sent) == 1
+        assert "Не входить" in notifier.sent[0]["text"]
+        assert tracker.stats["blocked"] == 1
+
+    def test_нормальный_вход_молчит(self, storage):
+        signal(storage, NOW - 300, price=0.55)
+        notifier = FakeNotifier()
+        tracker = self._run(storage, BOOK_PAYLOAD, notifier)
+        assert notifier.sent == []
+        assert tracker.stats["blocked"] == 0
+
+    def test_вердикт_вешается_веткой_к_сигналу(self, storage):
+        """Сообщение приходит через две минуты. Без привязки непонятно,
+        к какому из сигналов оно относится."""
+        sid = signal(storage, NOW - 300, price=0.40)
+        storage.update_signal_telegram(sid, 4242)
+        cheap = {"asks": [{"price": "0.42", "size": "20000"}]}
+        notifier = FakeNotifier()
+        self._run(storage, cheap, notifier)
+        assert notifier.sent[0]["reply_to"] == 4242
+
+    def test_без_нотификатора_замер_всё_равно_пишется(self, storage):
+        sid = signal(storage, NOW - 300, price=0.40)
+        cheap = {"asks": [{"price": "0.42", "size": "20000"}]}
+        tracker = EntryPriceTracker(storage, CfgVerdict(), notifier=None)
+
+        async def go():
+            rows = storage.signals_awaiting_entry(
+                ready_before=NOW - 120, oldest=NOW - 1800, limit=20)
+            await tracker._one(FakeSession(cheap), rows[0], NOW)
+
+        asyncio.run(go())
+        with storage._conn() as c:
+            assert c.execute(
+                "SELECT COUNT(*) FROM signal_entries WHERE signal_id=?",
+                (sid,)).fetchone()[0] == 1
+
+    def test_сбой_телеграма_не_теряет_замер(self, storage):
+        """Вердикт — довесок. Уронить из-за него запись цены нельзя."""
+        sid = signal(storage, NOW - 300, price=0.40)
+        cheap = {"asks": [{"price": "0.42", "size": "20000"}]}
+        self._run(storage, cheap, FakeNotifier(fail=True))
+        with storage._conn() as c:
+            assert c.execute(
+                "SELECT fill_2000 FROM signal_entries WHERE signal_id=?",
+                (sid,)).fetchone()[0] is not None
+
+    def test_выключённый_вердикт_молчит(self, storage):
+        class Off(CfgVerdict):
+            entry_verdict_enabled = False
+
+        signal(storage, NOW - 300, price=0.40)
+        cheap = {"asks": [{"price": "0.42", "size": "20000"}]}
+        notifier = FakeNotifier()
+        self._run(storage, cheap, notifier, cfg=Off)
+        assert notifier.sent == []
+
+    def test_старый_конфиг_без_порога_не_блокирует(self, storage):
+        """Cfg без новых полей — ровно то, что бывает при откате настроек."""
+        signal(storage, NOW - 300, price=0.40)
+        cheap = {"asks": [{"price": "0.42", "size": "20000"}]}
+        notifier = FakeNotifier()
+        self._run(storage, cheap, notifier, cfg=Cfg)
+        assert notifier.sent == []

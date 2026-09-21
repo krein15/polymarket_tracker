@@ -81,3 +81,56 @@ class TestIgnore:
             pass
 
         assert not is_ignored_for(Market("esports", {"sports"}), Bare())
+
+
+class TestКиберспортОтдельноОтСпорта:
+    """Фильтровать надо по тегу esports, а не по sports.
+
+    Правка 15.09 поставила IGNORED_CATEGORIES=crypto,sports и заодно
+    выключила обычный спорт: погоня упала с 20 сигналов в сутки до нуля,
+    быстрая полоса — с 18 до 0.3. Замер на 541 сигнале с исходом, с
+    порогом входа 0.50:
+
+        обычный спорт  n=131  ROI  +3.5%  перевес трейдера  +9.8 пп
+        киберспорт     n=248  ROI  -8.7%  перевес трейдера  +2.3 пп
+
+    И главное: ранние ончейн-сигналы — 66 из 78 — это обычный спорт. Без
+    него единственная ветка, входящая по цене трейдера, почти пустеет.
+
+    Теги ниже сняты с живых рынков Polymarket 21.09.2026 (include_tag=true):
+    esports стоит на всех трёх дисциплинах и ни на одном обычном спорте.
+    """
+
+    IGNORED = {"crypto", "esports"}
+
+    КИБЕР = {
+        "lol": {"esports", "games", "league-of-legends", "sports"},
+        "cs2": {"counter-strike-2", "esports", "games", "sports"},
+        "dota2": {"dota-2", "esports", "games", "sports"},
+    }
+    ОБЫЧНЫЙ = {
+        "nfl": {"games", "nfl", "nfl-gameday", "sports"},
+        "mlb": {"baseball", "games", "mlb", "sports"},
+        "cfb": {"cfb", "cfb-gameday", "games", "sports"},
+        "atp": {"games", "sports", "tennis"},
+        "epl": {"epl", "games", "premier-league", "soccer", "sports"},
+        "ucl": {"games", "soccer", "sports", "ucl", "ucl-matchday"},
+    }
+
+    def test_киберспорт_отсекается(self):
+        for имя, tags in self.КИБЕР.items():
+            assert is_ignored(Market("", tags), set(), self.IGNORED), имя
+
+    def test_обычный_спорт_проходит(self):
+        for имя, tags in self.ОБЫЧНЫЙ.items():
+            assert not is_ignored(Market("", tags), set(), self.IGNORED), имя
+
+    def test_крипта_по_прежнему_отсекается(self):
+        assert is_ignored(Market("crypto", {"crypto", "bitcoin"}),
+                          set(), self.IGNORED)
+
+    def test_старое_правило_ловило_весь_спорт(self):
+        """Ради чего правка: sports стоит и на киберспорте, и на NFL."""
+        старое = {"crypto", "sports"}
+        assert is_ignored(Market("", self.КИБЕР["lol"]), set(), старое)
+        assert is_ignored(Market("", self.ОБЫЧНЫЙ["nfl"]), set(), старое)

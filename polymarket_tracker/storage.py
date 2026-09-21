@@ -531,7 +531,8 @@ class Storage:
         with self._conn() as c:
             return c.execute(
                 "SELECT s.id, COALESCE(o.created_ts, s.ts) AS ts, "
-                "       s.token_id, s.price, s.signal_type "
+                "       s.token_id, s.price, s.signal_type, "
+                "       s.market_slug, s.telegram_msg_id "
                 "FROM signals s "
                 "LEFT JOIN signal_entries e ON e.signal_id = s.id "
                 "LEFT JOIN signal_outcomes o ON o.signal_id = s.id "

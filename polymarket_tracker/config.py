@@ -162,6 +162,12 @@ class Config:
     # прежние +44% ROI считались от цены трейдера, а не от нашей.
     entry_price_enabled: bool = True
     entry_delay_sec: int = 120
+    # Ниже какой достижимой цены вход считается заведомо убыточным.
+    # 541 замер с исходом: вход ниже 0.50 — это четверть сделок и 84%
+    # всего убытка, причём там в минусе и сам трейдер (перевес -36.8 пп
+    # ниже 0.35, -19.3 пп на 0.35-0.50, и ровно 0 на 0.50-0.60).
+    entry_min_price: float = 0.50
+    entry_verdict_enabled: bool = True
 
     heartbeat_enabled: bool = True
     heartbeat_interval_hours: float = 24.0
@@ -270,6 +276,8 @@ class Config:
             chase_retract_max_per_hour=_int("CHASE_RETRACT_MAX_PER_HOUR", 3),
             entry_price_enabled=_bool("ENTRY_PRICE_ENABLED", True),
             entry_delay_sec=_int("ENTRY_DELAY_SEC", 120),
+            entry_min_price=_float("ENTRY_MIN_PRICE", 0.50),
+            entry_verdict_enabled=_bool("ENTRY_VERDICT_ENABLED", True),
             heartbeat_enabled=_bool("HEARTBEAT_ENABLED", True),
             heartbeat_interval_hours=_float("HEARTBEAT_INTERVAL_HOURS", 24.0),
             stall_alert_minutes=_float("STALL_ALERT_MINUTES", 20.0),

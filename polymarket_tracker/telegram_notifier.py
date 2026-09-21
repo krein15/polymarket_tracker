@@ -90,13 +90,18 @@ class TelegramNotifier:
         """Сбой, требующий внимания."""
         return await self._send_message(f"🔴 {text}")
 
-    async def send_html(self, text: str) -> Optional[int]:
+    async def send_html(self, text: str,
+                        reply_to: Optional[int] = None) -> Optional[int]:
         """Готовая HTML-разметка — БЕЗ экранирования.
 
         Нужен отдельным методом: send_status экранирует всё подряд, и
         сообщения, собранные с тегами, приходили с видимыми <b> в тексте.
+
+        reply_to подвешивает сообщение веткой к исходному сигналу. Нужен
+        вердикту по цене входа: он приходит через две минуты, и без
+        привязки непонятно, к какому из сигналов относится.
         """
-        return await self._send_message(text)
+        return await self._send_message(text, reply_to=reply_to)
 
     def _budget_ok(self) -> bool:
         """Общий потолок сообщений в час — поверх всех веток.
@@ -120,7 +125,8 @@ class TelegramNotifier:
         self._sent_times.append(now)
         return True
 
-    async def _send_message(self, text: str) -> Optional[int]:
+    async def _send_message(self, text: str,
+                            reply_to: Optional[int] = None) -> Optional[int]:
         if not self._budget_ok():
             return None
         if self._session is None:
@@ -132,6 +138,11 @@ class TelegramNotifier:
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
+        if reply_to:
+            payload["reply_to_message_id"] = reply_to
+            # Исходное сообщение могло быть удалено вручную. Без этого
+            # флага Telegram отвечает 400 и вердикт теряется целиком.
+            payload["allow_sending_without_reply"] = True
 
         for attempt in range(3):
             try:
