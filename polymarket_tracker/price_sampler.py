@@ -80,8 +80,17 @@ COOLDOWN_SEC = 7 * 86400
 # Дальний горизонт не берём: исход по нему придёт позже, чем нужен ответ.
 MAX_DAYS_TO_END = 30
 
-# На какой размер считаем цену исполнения. Тот же, что у замера входа,
-# чтобы числа были сравнимы.
+# На какие размеры считаем цену исполнения.
+#
+# Размер здесь не подробность, а половина вопроса. $2000 по цене 0.02 —
+# это 100 000 долей, и книга столько не отдаёт. На живой выборке ордер
+# $2000 проходил с переплатой меньше 5% лишь у 23% рынков, и почти все
+# они дороже 0.80; у случайного рынка медианная переплата за размер
+# 30.8% против 0.6% у рынка, где только что прошла крупная сделка.
+#
+# Поэтому меряем лесенкой: где перевес переживёт $200, но не $2000, это
+# тоже ответ — просто про другой масштаб позиции.
+FILL_SIZES_USDC = (200.0, 500.0, 2000.0)
 FILL_SIZE_USDC = 2000.0
 
 # Пауза между запросами стакана. Рынков за проход немного, спешить некуда.
@@ -188,13 +197,15 @@ def book_prices(payload: dict, other: dict = None) -> dict:
     mid = None
     if best_ask is not None and best_bid is not None:
         mid = (best_ask + best_bid) / 2.0
-    return {
+    out = {
         "mid": mid,
         "best_bid": best_bid,
         "best_ask": best_ask,
-        "fill_2000": fill_price(asks, FILL_SIZE_USDC),
         "depth_usdc": sum(p * s for p, s in asks),
     }
+    for size in FILL_SIZES_USDC:
+        out["fill_{:.0f}".format(size)] = fill_price(asks, size)
+    return out
 
 
 class PriceSampler:
@@ -341,16 +352,21 @@ class PriceSampler:
             # Зеркалить можно только на бинарном рынке: у события с тремя
             # исходами "не этот" не сводится к одному другому.
             other = books[1 - i] if binary else None
+            empty = {"mid": None, "best_bid": None, "best_ask": None,
+                     "depth_usdc": None}
+            empty.update({"fill_{:.0f}".format(x): None
+                          for x in FILL_SIZES_USDC})
             prices = (book_prices(payload, other) if payload is not None
-                      else {"mid": None, "best_bid": None, "best_ask": None,
-                            "fill_2000": None, "depth_usdc": None})
+                      else empty)
             if prices["mid"] is None:
                 self.stats["no_book"] += 1
             row = self.storage.save_price_sample(
                 ts=now, token_id=token, condition_id=m["condition_id"],
                 market_slug=m["slug"], outcome=outcome,
                 mid=prices["mid"], best_bid=prices["best_bid"],
-                best_ask=prices["best_ask"], fill_2000=prices["fill_2000"],
+                best_ask=prices["best_ask"],
+                fill_200=prices["fill_200"], fill_500=prices["fill_500"],
+                fill_2000=prices["fill_2000"],
                 depth_usdc=prices["depth_usdc"],
                 volume_24h=m["volume_24h"], liquidity=m["liquidity"],
                 end_date_ts=m["end_date_ts"], category=m["category"],

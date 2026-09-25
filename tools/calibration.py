@@ -45,7 +45,8 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 DB = os.path.join(ROOT, "data", "tracker.db")
-PRICE_COLUMNS = ("mid", "best_ask", "fill_2000")
+PRICE_COLUMNS = ("mid", "best_ask", "fill_200", "fill_500",
+                 "fill_2000")
 BANDS = (0.00, 0.05, 0.10, 0.20, 0.30, 0.40, 0.50,
          0.60, 0.70, 0.80, 0.90, 0.95, 1.00)
 MIN_BAND = 40
@@ -78,7 +79,8 @@ def load(db, price_col, category=None, max_days=None):
     try:
         rows = c.execute(
             "SELECT ts, market_slug, outcome, mid, best_bid, best_ask, "
-            "       fill_2000, depth_usdc, volume_24h, liquidity, "
+            "       fill_200, fill_500, fill_2000, depth_usdc, volume_24h, "
+            "       liquidity, "
             "       end_date_ts, category, settled_price, won, hours_to_resolve "
             "FROM price_samples WHERE market_resolved = 1 "
             "  AND settled_price IS NOT NULL"
@@ -141,7 +143,7 @@ def main():
                     help="только рынки, закрывшиеся быстрее N дней")
     a = ap.parse_args()
 
-    cols = [a.price] if a.price else list(PRICE_COLUMNS)
+    cols = [a.price] if a.price else ["mid", "best_ask", "fill_2000"]
     first = True
     for col in cols:
         rows, total = load(a.db, col, a.category, a.max_days)
@@ -160,7 +162,9 @@ def main():
             first = False
         name = {"mid": "по середине стакана (есть ли смещение)",
                 "best_ask": "по лучшему аску (первая сотня долларов)",
-                "fill_2000": "по цене ордера $2000 (реальный вход)"}[col]
+                "fill_200": "по цене ордера $200",
+                "fill_500": "по цене ордера $500",
+                "fill_2000": "по цене ордера $2000"}[col]
         table(rows, name)
 
     rows, _ = load(a.db, cols[-1], a.category, a.max_days)

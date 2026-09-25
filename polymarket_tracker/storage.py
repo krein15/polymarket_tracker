@@ -183,6 +183,13 @@ CREATE TABLE IF NOT EXISTS price_samples (
     mid REAL,
     best_bid REAL,
     best_ask REAL,
+    -- Цена налива на разные суммы. Размер здесь не подробность, а
+    -- половина вопроса: $2000 по цене 0.02 — это 100 000 долей, и книга
+    -- столько не отдаёт ни в каком рынке. На живой выборке ордер $2000
+    -- проходил с переплатой меньше 5% только у 23% рынков, и почти все
+    -- они дороже 0.80.
+    fill_200 REAL,
+    fill_500 REAL,
     fill_2000 REAL,
     depth_usdc REAL,
     volume_24h REAL,
@@ -366,6 +373,11 @@ class Storage:
                 "ALTER TABLE shadow_trades ADD COLUMN chase REAL",
                 "ALTER TABLE shadow_trades ADD COLUMN chase_money REAL",
                 "ALTER TABLE shadow_trades ADD COLUMN chase_checked_ts INTEGER",
+                # Цена налива на меньшие суммы: на $2000 торгуема почти
+                # только дорогая половина шкалы, и без этих колонок
+                # вопрос "переживёт ли перевес вход" остаётся без ответа.
+                "ALTER TABLE price_samples ADD COLUMN fill_200 REAL",
+                "ALTER TABLE price_samples ADD COLUMN fill_500 REAL",
             ):
                 try:
                     c.execute(ddl)
@@ -987,21 +999,30 @@ class Storage:
         end_date_ts: Optional[int],
         category: Optional[str],
         now_ts: int,
+        fill_200: Optional[float] = None,
+        fill_500: Optional[float] = None,
     ) -> Optional[int]:
-        """Записать снимок цены. None, если такой уже есть (тот же токен и ts)."""
+        """Записать снимок цены. None, если такой уже есть (тот же токен и ts).
+
+        fill_200 и fill_500 со значением по умолчанию: колонки добавлены
+        позже, и у старых снимков их нет. Размер ордера — половина
+        вопроса о торгуемости, см. комментарий к схеме.
+        """
         with self._conn() as c:
             cur = c.execute(
                 """
                 INSERT INTO price_samples (
                     ts, token_id, condition_id, market_slug, outcome,
-                    mid, best_bid, best_ask, fill_2000, depth_usdc,
-                    volume_24h, liquidity, end_date_ts, category, created_ts
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    mid, best_bid, best_ask, fill_200, fill_500, fill_2000,
+                    depth_usdc, volume_24h, end_date_ts, liquidity,
+                    category, created_ts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(token_id, ts) DO NOTHING
                 """,
                 (ts, token_id, condition_id, market_slug, outcome, mid,
-                 best_bid, best_ask, fill_2000, depth_usdc, volume_24h,
-                 liquidity, end_date_ts, category, now_ts),
+                 best_bid, best_ask, fill_200, fill_500, fill_2000,
+                 depth_usdc, volume_24h, end_date_ts, liquidity,
+                 category, now_ts),
             )
             return cur.lastrowid if cur.rowcount else None
 

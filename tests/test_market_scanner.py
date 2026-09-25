@@ -24,6 +24,11 @@ from polymarket_tracker.market_scanner import (
     tags_of,
 )
 
+# Момент "сейчас" фиксирован, и передавать его надо ВЕЗДЕ, где функция
+# его принимает. 25.09.2026 пять тестов этой группы упали без единой
+# правки в коде: в фикстуре стояла дата закрытия 2026-09-25, group_by_event
+# звали без now, и рынок "закрывается через неделю" стал закрывшимся.
+# Тест, зависящий от настенных часов, однажды ломается сам.
 NOW = datetime.datetime(2026, 9, 16, tzinfo=datetime.timezone.utc)
 
 
@@ -143,14 +148,14 @@ class TestGroup:
     def test_группирует_по_событию(self):
         pool = [market(events=[{"slug": "e1"}]) for _ in range(3)]
         pool += [market(events=[{"slug": "e2"}])]
-        groups = group_by_event(pool, min_size=3, exclusive_only=False)
+        groups = group_by_event(pool, min_size=3, exclusive_only=False, now=NOW)
         assert len(groups) == 1
         assert groups[0][0] == "e1"
 
     def test_предел_исходов_на_событие(self):
         """Без него событие с одиннадцатью кандидатами съедает бюджет."""
         pool = [market(events=[{"slug": "e"}]) for _ in range(11)]
-        groups = group_by_event(pool, min_size=3, max_per_event=5,
+        groups = group_by_event(pool, min_size=3, max_per_event=5, now=NOW,
                                 exclusive_only=False)
         assert len(groups[0][1]) == 5
 
@@ -159,7 +164,7 @@ class TestGroup:
         pool = [market(events=[{"slug": "e"}],
                        outcomePrices=f'["{p}", "0.5"]')
                 for p in ("0.15", "0.80", "0.45")]
-        groups = group_by_event(pool, min_size=3, max_per_event=2,
+        groups = group_by_event(pool, min_size=3, max_per_event=2, now=NOW,
                                 exclusive_only=False)
         prices = [float(__import__("json").loads(m["outcomePrices"])[0])
                   for m in groups[0][1]]
@@ -172,20 +177,20 @@ class TestGroup:
         pool = [market(events=[{"slug": "oil"}],
                        outcomePrices=f'["{p}", "0.5"]')
                 for p in ("0.60", "0.45", "0.30")]
-        assert group_by_event(pool, min_size=3) == []
+        assert group_by_event(pool, min_size=3, now=NOW) == []
 
     def test_исчерпывающий_набор_берётся(self):
         """Сумма около единицы — исходы действительно взаимоисключающие."""
         pool = [market(events=[{"slug": "midterms"}],
                        outcomePrices=f'["{p}", "0.5"]')
                 for p in ("0.50", "0.30", "0.19")]
-        assert len(group_by_event(pool, min_size=3)) == 1
+        assert len(group_by_event(pool, min_size=3, now=NOW)) == 1
 
     def test_вложенные_можно_разрешить_явно(self):
         pool = [market(events=[{"slug": "oil"}],
                        outcomePrices=f'["{p}", "0.5"]')
                 for p in ("0.60", "0.45", "0.30")]
-        assert len(group_by_event(pool, min_size=3, exclusive_only=False)) == 1
+        assert len(group_by_event(pool, min_size=3, exclusive_only=False, now=NOW)) == 1
 
     def test_исключительность_по_полному_набору(self):
         """Порядок действий, который уже был нарушен: у нефти шесть исходов
@@ -197,4 +202,4 @@ class TestGroup:
         assert group_by_event(pool, min_size=3, now=NOW) == []
 
     def test_событий_без_группы_нет(self):
-        assert group_by_event([market(events=[])], min_size=3) == []
+        assert group_by_event([market(events=[])], min_size=3, now=NOW) == []
