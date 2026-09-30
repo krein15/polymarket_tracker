@@ -27,10 +27,12 @@ from conftest import NOW
 
 from polymarket_tracker.price_sampler import (
     PriceSampler,
+    balance_of,
     book_prices,
     mirror,
     parse_end_date,
     parse_market,
+    stratum_of,
 )
 
 DAY = 86400
@@ -210,13 +212,15 @@ class TestОтбор:
         assert s._pick([gamma_market()]) == []
         assert s.stats["skipped_cooldown"] == 1
 
-    def test_отбор_не_смотрит_на_цену(self):
-        """Ключевое свойство всего замера: попадёт рынок в выборку или
-        нет, не должно зависеть от его цены. Иначе калибровку мерить
-        бессмысленно — мы измерим собственный фильтр.
+    def test_отбор_симметричен_по_сторонам(self):
+        """Дешёвый Yes и дорогой Yes — это один и тот же рынок с разных
+        сторон, и попадать в выборку он должен одинаково.
 
-        Проверяем поведением: те же рынки с вывернутыми наизнанку ценами
-        должны дать тот же отбор.
+        С 30.09 отбор расслоён по цене намеренно (см.
+        TestРасслоение), но слой считается от min(цена, 1-цена) —
+        "расстояния до определённости". Поэтому рынок 0.02/0.98 и рынок
+        0.98/0.02 неразличимы, как и должно быть: обе строки всё равно
+        попадут в выборку.
         """
         дешёвые = [gamma_market(slug=f"m{i}", bestBid=0.01, bestAsk=0.02,
                                 outcomePrices=json.dumps(["0.01", "0.99"]),
@@ -350,3 +354,76 @@ class _Resp:
 
     async def __aexit__(self, *a):
         return False
+
+
+class TestРасслоение:
+    """Квота на слой цены.
+
+    За 8.5 дней набралось 738 закрывшихся наблюдений — и 566 из них в
+    двух крайних полосах, а в середине по 10-22. Так вышло не случайно:
+    рынков вида "кто из двадцати кандидатов" на Polymarket много больше,
+    чем честных 50/50, и у каждого девятнадцать исходов — дешёвые
+    аутсайдеры. При равномерном обходе середина шкалы набиралась бы
+    месяцы.
+
+    Расслоение оценку не портит: калибровка считается ВНУТРИ полосы, и
+    квота на слой на это не влияет. Чего теперь нельзя — складывать
+    полосы в одно число без весов.
+    """
+
+    def _pick(self, raw, batch=8):
+        class C:
+            price_sample_batch = batch
+            price_sample_max_days = 30
+        return PriceSampler(FakeStorage(), C())._pick(raw)
+
+    def _m(self, i, price):
+        return gamma_market(
+            slug=f"m{i}", bestBid=price - 0.005, bestAsk=price + 0.005,
+            clobTokenIds=json.dumps([f"y{i}", f"n{i}"]))
+
+    def test_слой_считается_от_расстояния_до_определённости(self):
+        assert abs(balance_of(self._m(0, 0.02)) - 0.02) < 1e-9
+        assert abs(balance_of(self._m(0, 0.98)) - 0.02) < 1e-9
+        assert abs(balance_of(self._m(0, 0.50)) - 0.50) < 1e-9
+
+    def test_серединные_рынки_не_тонут_среди_аутсайдеров(self):
+        """Главное свойство. 40 дешёвых и 4 серединных — без квоты
+        серединные не попали бы в выборку вовсе."""
+        raw = [self._m(i, 0.02) for i in range(40)]
+        raw += [self._m(100 + i, 0.50) for i in range(4)]
+        picked = self._pick(raw)
+        middles = [p for p in picked if p["balance"] > 0.35]
+        assert len(middles) == 4, "серединные рынки утонули"
+
+    def test_квота_ограничивает_крайний_слой(self):
+        raw = [self._m(i, 0.02) for i in range(40)]
+        picked = self._pick(raw, batch=8)
+        cheap = [p for p in picked if p["balance"] < 0.05]
+        # Квота = batch // 4 = 2; остальное добирается из излишка, но
+        # именно по квоте в слой попадают первые два.
+        assert 2 <= len(cheap) <= 8
+
+    def test_недобор_слоя_не_оставляет_проход_пустым(self):
+        """На странице может не оказаться рынков нужной цены — тогда
+        добираем чем есть, иначе час уйдёт впустую."""
+        raw = [self._m(i, 0.02) for i in range(10)]
+        assert len(self._pick(raw, batch=8)) == 8
+
+    def test_рынок_без_цены_в_списке_берётся_последним(self):
+        """Цена из списка нужна до того, как тратить запрос на книгу.
+        Если её нет, слой неизвестен — такой рынок не должен съедать
+        чужую квоту."""
+        raw = [gamma_market(slug="без-цены",
+                            clobTokenIds=json.dumps(["yX", "nX"]))]
+        raw += [self._m(i, 0.50) for i in range(4)]
+        picked = self._pick(raw, batch=4)
+        assert all(p["slug"] != "без-цены" for p in picked)
+
+    def test_все_слои_представлены(self):
+        raw = []
+        for i, price in enumerate((0.02, 0.10, 0.28, 0.48)):
+            raw += [self._m(i * 10 + j, price) for j in range(5)]
+        picked = self._pick(raw, batch=8)
+        strata = {stratum_of(p["balance"]) for p in picked}
+        assert len(strata) == 4, f"представлены только слои {strata}"

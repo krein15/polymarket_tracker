@@ -94,17 +94,25 @@ def load(db, price_col, category=None, max_days=None):
 
     out = []
     for r in rows:
-        price = r[price_col]
-        if price is None or not (0.0 < price < 1.0):
+        # Полоса — всегда по ОЦЕНКЕ рынка, а не по цене исполнения.
+        # Иначе аутсайдер по 0.01, чей ордер на $2000 наливается по 0.44,
+        # попадает в полосу "0.40-0.50" и портит её винрейт. Именно так и
+        # вышло: таблица показывала 4% побед в полосе "0.60-0.70".
+        band = r["mid"] if r["mid"] is not None else r["best_ask"]
+        paid = r[price_col]
+        if band is None or not (0.0 < band < 1.0):
+            continue
+        if paid is None or not (0.0 < paid < 1.0):
             continue
         if category and (r["category"] or "") != category:
             continue
         if max_days and r["hours_to_resolve"] and r["hours_to_resolve"] > max_days * 24:
             continue
         d = dict(r)
-        d["price"] = price
+        d["price"] = band
+        d["paid"] = paid
         d["win"] = 1 if r["settled_price"] >= 0.5 else 0
-        d["roi"] = (r["settled_price"] - price) / price
+        d["roi"] = (r["settled_price"] - paid) / paid
         out.append(d)
     return out, total
 
@@ -112,9 +120,9 @@ def load(db, price_col, category=None, max_days=None):
 def table(rows, title):
     print()
     print("=== " + title + " ===")
-    print("  {:<12}{:>6}{:>9}{:>9}{:>17}{:>10}{:>18}".format(
-        "цена", "n", "цена", "винрейт", "интервал винрейта", "ROI",
-        "интервал ROI"))
+    print("  {:<12}{:>6}{:>8}{:>8}{:>9}{:>17}{:>10}{:>18}".format(
+        "оценка", "n", "оценка", "платим", "винрейт", "интервал винрейта",
+        "ROI", "интервал ROI"))
     for lo, hi in zip(BANDS, BANDS[1:]):
         sub = [d for d in rows if lo <= d["price"] < hi]
         n = len(sub)
@@ -124,13 +132,21 @@ def table(rows, title):
             continue
         k = sum(d["win"] for d in sub)
         p = sum(d["price"] for d in sub) / n
+        paid = sum(d["paid"] for d in sub) / n
         wlo, whi = wilson(k, n)
         m, rlo, rhi = mean_ci([d["roi"] for d in sub])
-        mark = "  <-" if rlo > 0 or rhi < 0 else ""
-        print("  {:<12}{:>6}{:>8.1f}%{:>8.1f}%   [{:>5.1f};{:>5.1f}]"
-              "{:>+9.1f}%   [{:>+6.1f};{:>+6.1f}]{}"
-              .format(label, n, p * 100, k / n * 100, wlo * 100, whi * 100,
-                      m * 100, rlo * 100, rhi * 100, mark))
+        # Интервал ROI на дешёвых полосах не заслуживает доверия: один
+        # выигрыш по цене 0.01 даёт +9900%, и нормальное приближение
+        # уезжает ниже -100%, чего не бывает. Там смотреть надо на
+        # винрейт против оценки, а не на ROI.
+        shaky = rlo < -1.0
+        mark = "" if shaky else ("  <-" if rlo > 0 or rhi < 0 else "")
+        ci = ("       разброс" if shaky
+              else "[{:>+6.1f};{:>+6.1f}]".format(rlo * 100, rhi * 100))
+        print("  {:<12}{:>6}{:>7.1f}%{:>7.1f}%{:>8.1f}%   [{:>5.1f};{:>5.1f}]"
+              "{:>+9.1f}%   {}{}"
+              .format(label, n, p * 100, paid * 100, k / n * 100,
+                      wlo * 100, whi * 100, m * 100, ci, mark))
 
 
 def main():
@@ -158,7 +174,10 @@ def main():
                 return 0
             print("закрывшихся и пригодных: {}".format(len(rows)))
             print()
-            print("Стрелка справа = интервал ROI не накрывает ноль.")
+            print("Полоса — по ОЦЕНКЕ рынка (середина стакана), "
+                  "колонка \"платим\" — цена исполнения.")
+            print("Рынок точен, если винрейт равен оценке. "
+                  "Стрелка справа = интервал ROI не накрывает ноль.")
             first = False
         name = {"mid": "по середине стакана (есть ли смещение)",
                 "best_ask": "по лучшему аску (первая сотня долларов)",

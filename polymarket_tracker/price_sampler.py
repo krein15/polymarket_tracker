@@ -101,6 +101,20 @@ REQUEST_PAUSE_SEC = 0.15
 # ответам API.
 START_BOUND = 1000
 
+# Слои по "расстоянию до определённости": min(цена, 1 - цена). Рынок
+# попадает ровно в один слой, а строк даёт две — по числу исходов.
+#
+# Зачем. За 8.5 дней набралось 738 закрывшихся наблюдений, но 566 из них
+# сидят в двух крайних полосах, а в середине по 10-22. Так вышло не
+# случайно: рынков вида "кто из двадцати кандидатов" на Polymarket много
+# больше, чем честных 50/50, и у каждого девятнадцать исходов — дешёвые
+# аутсайдеры. При равномерном обходе середина шкалы набиралась бы месяцы.
+#
+# Расслоение это чинит и оценку не портит: калибровка считается ВНУТРИ
+# каждой полосы, а квота на слой на это не влияет. Чего теперь нельзя —
+# складывать полосы в одно число без весов.
+PRICE_STRATA = ((0.00, 0.05), (0.05, 0.20), (0.20, 0.35), (0.35, 0.51))
+
 OFFSET_KEY = "price_sampler_offset"
 
 
@@ -144,6 +158,7 @@ def parse_market(m: dict) -> Optional[dict]:
         for t in (m.get("tags") or []) if t
     )
     return {
+        "balance": balance_of(m),
         "condition_id": m.get("conditionId"),
         "slug": m.get("slug"),
         "tokens": [str(t) for t in tokens],
@@ -153,6 +168,33 @@ def parse_market(m: dict) -> Optional[dict]:
         "end_date_ts": parse_end_date(m.get("endDateIso") or m.get("endDate")),
         "category": _category_from_tags(tag_slugs),
     }
+
+
+def balance_of(m: dict) -> Optional[float]:
+    """Насколько рынок далёк от определённости: min(цена, 1 - цена).
+
+    Берём из списка Gamma, а не из стакана: слой нужен ДО того, как мы
+    решим тратить запрос на книгу. Точности списка для этого хватает —
+    промах на полпроцента слоя не меняет.
+    """
+    bid, ask = _num(m.get("bestBid")), _num(m.get("bestAsk"))
+    if bid is None or ask is None:
+        price = _num(m.get("lastTradePrice"))
+    else:
+        price = (bid + ask) / 2.0
+    if price is None or not (0.0 < price < 1.0):
+        return None
+    return min(price, 1.0 - price)
+
+
+def stratum_of(balance: Optional[float]) -> Optional[int]:
+    """Номер слоя, либо None — если цену из списка взять не удалось."""
+    if balance is None:
+        return None
+    for i, (lo, hi) in enumerate(PRICE_STRATA):
+        if lo <= balance < hi:
+            return i
+    return len(PRICE_STRATA) - 1
 
 
 def _num(v) -> Optional[float]:
@@ -217,13 +259,16 @@ class PriceSampler:
                                 MAX_DAYS_TO_END)
         self.batch = getattr(config, "price_sample_batch", BATCH_MARKETS)
         self.stats = {"pages": 0, "seen": 0, "skipped_cooldown": 0,
-                      "skipped_far": 0, "saved": 0, "no_book": 0}
+                      "skipped_far": 0, "skipped_quota": 0, "saved": 0,
+                      "no_book": 0}
 
     async def run(self) -> None:
         log.info(
-            "Снимки цены рынков: раз в %d мин, до %d рынков за проход, "
-            "горизонт %d дней",
-            INTERVAL_SEC // 60, self.batch, self.max_days,
+            "Снимки цены рынков: раз в %d мин, до %d рынков за проход "
+            "(по %d на каждый из %d слоёв цены), горизонт %d дней",
+            INTERVAL_SEC // 60, self.batch,
+            max(1, self.batch // len(PRICE_STRATA)), len(PRICE_STRATA),
+            self.max_days,
         )
         await asyncio.sleep(FIRST_RUN_DELAY_SEC)
         while True:
@@ -323,14 +368,56 @@ class PriceSampler:
 
         tokens = [t for p in parsed for t in p["tokens"]]
         fresh = self.storage.price_sampled_since(tokens, now - COOLDOWN_SEC)
-        out = []
+
+        # Квота на слой. Рынков в середине шкалы мало, и без квоты они
+        # тонут: 566 из 738 закрывшихся наблюдений пришлись на две
+        # крайние полосы.
+        quota = max(1, self.batch // len(PRICE_STRATA))
+        taken = [0] * len(PRICE_STRATA)
+        out, spare = [], []
         for p in parsed:
             if any(t in fresh for t in p["tokens"]):
                 self.stats["skipped_cooldown"] += 1
                 continue
+            i = stratum_of(p["balance"])
+            if i is None:
+                # Цены в списке не было — такие берём в последнюю очередь,
+                # чтобы они не съедали квоту у слоёв.
+                spare.append(p)
+                continue
+            if taken[i] >= quota:
+                self.stats["skipped_quota"] += 1
+                spare.append(p)
+                continue
+            taken[i] += 1
             out.append(p)
             if len(out) >= self.batch:
+                return out
+        # Квота — это ПОЛ, а не потолок. Остаток добираем из излишка по
+        # кругу, по одному рынку из каждого слоя.
+        #
+        # Почему именно по кругу, а не сортировкой по заполненности: на
+        # странице бывает сорок аутсайдеров и четыре рынка из середины,
+        # и после квоты счётчики у обоих слоёв равны. Любая сортировка
+        # при ничьей отдаёт места тем, кого просто больше, — и редкие
+        # рынки середины снова тонут. Обход по кругу выбирает их все.
+        очередь = {}
+        for m in spare:
+            очередь.setdefault(stratum_of(m["balance"]), []).append(m)
+        известные = sorted(i for i in очередь if i is not None)
+        while len(out) < self.batch and any(очередь[i] for i in известные):
+            for i in известные:
+                if not очередь[i] or len(out) >= self.batch:
+                    continue
+                out.append(очередь[i].pop(0))
+        # Рынки, у которых Gamma не отдала цену, идут в самом конце: слой
+        # у них неизвестен, и место в выборке они занимать не должны,
+        # пока есть те, чей слой мы знаем. Совсем не брать их нельзя —
+        # отсутствие цены связано с малостью рынка, и это был бы отбор.
+        for m in очередь.get(None, []):
+            if len(out) >= self.batch:
                 break
+            out.append(m)
         return out
 
     async def _snapshot(self, session, m: dict) -> int:
