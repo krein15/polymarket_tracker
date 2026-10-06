@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 
 from conftest import NOW
@@ -38,6 +39,14 @@ from polymarket_tracker.price_sampler import (
 DAY = 86400
 
 
+# Дата закрытия — относительная. Пять дней назад на фиксированной дате
+# молча упали тесты market_scanner: "закрывается через неделю" стало
+# "уже закрылось". Здесь ровно та же ловушка, и 06.10 она сработала.
+def _end_iso(days=10):
+    return (datetime.datetime.now(datetime.timezone.utc)
+            + datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def gamma_market(**over):
     m = {
         "conditionId": "0xc",
@@ -50,7 +59,7 @@ def gamma_market(**over):
         "acceptingOrders": True,
         "volume24hr": 12345.6,
         "liquidity": 6789.0,
-        "endDateIso": "2026-10-01T04:59:00Z",
+        "endDateIso": _end_iso(),
         "tags": [{"slug": "politics"}, {"slug": "elections"}],
     }
     m.update(over)
@@ -70,7 +79,8 @@ class TestРазборРынка:
         assert p["tokens"] == ["tok-yes", "tok-no"]
         assert p["outcomes"] == ["Yes", "No"]
         assert p["category"] == "politics"
-        assert p["end_date_ts"] == parse_end_date("2026-10-01T04:59:00Z")
+        iso = _end_iso()
+        assert parse_market(gamma_market(endDateIso=iso))["end_date_ts"] ==             parse_end_date(iso)
 
     def test_закрытый_рынок_пропускается(self):
         assert parse_market(gamma_market(closed=True)) is None
@@ -197,13 +207,13 @@ class TestОтбор:
     def test_дальние_рынки_отсекаются(self):
         """Годовой рынок даст исход через год — данных не дождаться."""
         s = self._sampler(FakeStorage())
-        raw = [gamma_market(endDateIso="2028-01-01T00:00:00Z")]
+        raw = [gamma_market(endDateIso=_end_iso(days=400))]
         assert s._pick(raw) == []
         assert s.stats["skipped_far"] == 1
 
     def test_уже_закрывшиеся_отсекаются(self):
         s = self._sampler(FakeStorage())
-        assert s._pick([gamma_market(endDateIso="2020-01-01T00:00:00Z")]) == []
+        assert s._pick([gamma_market(endDateIso=_end_iso(days=-5))]) == []
 
     def test_недавно_снятый_рынок_пропускается(self):
         """Повторные снимки одного рынка не независимы: выборка

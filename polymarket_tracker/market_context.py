@@ -250,20 +250,33 @@ class MarketContext:
                 except json.JSONDecodeError:
                     outcome_prices = []
 
+            idx_known = None
             try:
-                idx = [str(c) for c in clob_ids].index(str(token_id))
-                if idx < len(outcome_prices):
-                    current_price = float(outcome_prices[idx])
+                idx_known = [str(c) for c in clob_ids].index(str(token_id))
+                if idx_known < len(outcome_prices):
+                    current_price = float(outcome_prices[idx_known])
             except (ValueError, TypeError):
                 pass
 
             if current_price is None:
+                # lastTradePrice относится к ПЕРВОМУ исходу рынка. Для
+                # второго токена подставлять его нельзя: цена Yes вместо
+                # цены No — это инверсия, и при закрытом рынке она даёт
+                # ровно противоположный settled_price. Для второго исхода
+                # берём дополнение до единицы.
                 ltp = m.get("lastTradePrice")
                 if ltp is not None:
                     try:
-                        current_price = float(ltp)
+                        price = float(ltp)
                     except (ValueError, TypeError):
-                        pass
+                        price = None
+                    if price is not None:
+                        if idx_known == 0:
+                            current_price = price
+                        elif idx_known == 1 and len(clob_ids) == 2:
+                            current_price = 1.0 - price
+                        # Для многоисходных рынков дополнение не считается:
+                        # лучше остаться без цены, чем выдумать её.
 
             # Если рынок закрыт — то, что у нас в outcomePrices, это финальная цена.
             # Бинарный резолв: 1.0 для победителя, 0.0 для проигравшего.

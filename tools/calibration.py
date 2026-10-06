@@ -73,7 +73,7 @@ def mean_ci(values):
     return m, m - 1.96 * se, m + 1.96 * se
 
 
-def load(db, price_col, category=None, max_days=None):
+def load(db, price_col, category=None, max_days=None, two_sided=True):
     c = sqlite3.connect("file:" + db + "?mode=ro", uri=True)
     c.row_factory = sqlite3.Row
     try:
@@ -98,9 +98,21 @@ def load(db, price_col, category=None, max_days=None):
         # Иначе аутсайдер по 0.01, чей ордер на $2000 наливается по 0.44,
         # попадает в полосу "0.40-0.50" и портит её винрейт. Именно так и
         # вышло: таблица показывала 4% побед в полосе "0.60-0.70".
-        band = r["mid"] if r["mid"] is not None else r["best_ask"]
+        # Только двусторонний стакан. Односторонний — это не цена, а
+        # зависшая заявка: из 7 "фаворитов по 0.95+", которые проиграли,
+        # все семь имели ликвидность $1-4 и одну сторону книги. Вместе
+        # они давали отклонение z = -5.9 на 777 рынках, тогда как на
+        # 1215 рынках с живой книгой отклонения нет вовсе (z = -1.0).
+        #
+        # Исключение не подгонка: у рынка с одной заявкой в книге просто
+        # нет цены, о калибровке которой можно спрашивать. Строки эти
+        # по-прежнему собираются, и ключ --one-sided их показывает.
+        band = r["mid"] if two_sided else (
+            r["mid"] if r["mid"] is not None else r["best_ask"])
         paid = r[price_col]
         if band is None or not (0.0 < band < 1.0):
+            continue
+        if two_sided and r["mid"] is None:
             continue
         if paid is None or not (0.0 < paid < 1.0):
             continue
@@ -157,12 +169,16 @@ def main():
     ap.add_argument("--category", default=None)
     ap.add_argument("--max-days", type=float, default=None,
                     help="только рынки, закрывшиеся быстрее N дней")
+    ap.add_argument("--one-sided", action="store_true",
+                    help="включить рынки с односторонним стаканом "
+                         "(у них нет цены, см. комментарий в коде)")
     a = ap.parse_args()
 
     cols = [a.price] if a.price else ["mid", "best_ask", "fill_2000"]
     first = True
     for col in cols:
-        rows, total = load(a.db, col, a.category, a.max_days)
+        rows, total = load(a.db, col, a.category, a.max_days,
+                           two_sided=not a.one_sided)
         if rows is None:
             return 1
         if first:
@@ -186,7 +202,8 @@ def main():
                 "fill_2000": "по цене ордера $2000"}[col]
         table(rows, name)
 
-    rows, _ = load(a.db, cols[-1], a.category, a.max_days)
+    rows, _ = load(a.db, cols[-1], a.category, a.max_days,
+                   two_sided=not a.one_sided)
     if rows:
         print()
         print("=== по категориям (цена {}) ===".format(cols[-1]))
